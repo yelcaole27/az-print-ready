@@ -8,8 +8,10 @@
   --color-muted: var(--color-muted);
   --color-red: var(--color-red);
   --color-blue: var(--color-blue);
+  --color-blue-strong: var(--color-blue-strong);
   --color-green: var(--color-green);
   --color-yellow: var(--color-yellow);
+  --color-bar: #000000;
 
   --color-sheet: #FFFFFF;
   --color-sheet-ink: #111111;
@@ -25,10 +27,12 @@
   --color-surface: #F7F7F7;
   --color-line: #E5E5E5;
   --color-muted: #6B6B6B;
-  --color-red: #E5322D;
-  --color-blue: #1F5FBF;
-  --color-green: #1E9E55;
-  --color-yellow: #F2B705;
+  --color-red: #E8262B;
+  --color-blue: #1B9BF0;
+  --color-blue-strong: #0B72C9;
+  --color-green: #1DAA2F;
+  --color-yellow: #FFD500;
+  --color-bar: #000000;
   --shadow-sheet: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
 
@@ -39,17 +43,19 @@
   --color-surface: #0F0F10;
   --color-line: #2E2E30;
   --color-muted: #9A9A9F;
-  --color-red: #FF5A52;
-  --color-blue: #5B93F0;
-  --color-green: #3DBE76;
-  --color-yellow: #F5C333;
+  --color-red: #FF5A55;
+  --color-blue: #4DB3F5;
+  --color-blue-strong: #2F8FE0;
+  --color-green: #3CCB4F;
+  --color-yellow: #FFDD33;
+  --color-bar: #000000;
   --shadow-sheet: 0 2px 8px rgba(0, 0, 0, 0.5);
 }
 
 body {
   background-color: var(--color-surface);
   color: var(--color-ink);
-  min-width: 1200px;
+  min-width: 1100px;
   overflow-x: auto;
 }
 
@@ -100,5 +106,63 @@ body {
 
 .sheet-text-container s {
   text-decoration: line-through;
+}
+
+/* Print CSS rules */
+@media print {
+  @page {
+    margin: 0;
+    size: auto;
+  }
+
+  html, body {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #FFFFFF !important;
+    min-width: 0 !important;
+    overflow: visible !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Hide app shell and normal canvas during print */
+  #app-root {
+    display: none !important;
+  }
+
+  #print-root {
+    display: block !important;
+  }
+
+  .print-page {
+    page-break-after: always;
+    break-after: page;
+    box-shadow: none !important;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+}
+
+@media screen {
+  #print-root {
+    display: none;
+  }
+}
+
+/* Theme toggle icon switching without hydration mismatch */
+.theme-icon-sun {
+  display: none;
+}
+.theme-icon-moon {
+  display: block;
+}
+
+[data-theme="dark"] .theme-icon-sun {
+  display: block;
+}
+[data-theme="dark"] .theme-icon-moon {
+  display: none;
 }
 

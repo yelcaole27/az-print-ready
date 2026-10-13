@@ -9,6 +9,7 @@ import { snapMove, snapResizeEdge } from '@/lib/snapping';
 import { useSessionStore } from '@/store/useSessionStore';
 import { useUiStore } from '@/store/useUiStore';
 import { TextBoxEditor } from './TextBoxEditor';
+import { ElementContent } from './ElementContent';
 import { Tooltip } from '@/components/ui/Tooltip';
 
 export interface ElementBoxProps {
@@ -34,7 +35,7 @@ export function ElementBox({
 }: ElementBoxProps) {
   const assets = useSessionStore((state) => state.assets);
   const updateElement = useSessionStore((state) => state.updateElement);
-  const { setGuides, clearGuides, editingElement, setEditingElement } = useUiStore();
+  const { setGuides, clearGuides, editingElement, setEditingElement, setOverflow } = useUiStore();
 
   const isEditing =
     element.type === 'text' &&
@@ -42,6 +43,37 @@ export function ElementBox({
     editingElement?.elementId === element.id;
 
   const [isOverflow, setIsOverflow] = useState(false);
+  const staticMeasureRef = useRef<HTMLDivElement>(null);
+
+  const handleOverflowChange = useCallback((overflow: boolean) => {
+    setIsOverflow(overflow);
+    setOverflow(element.id, overflow);
+  }, [element.id, setOverflow]);
+
+  // Clean up overflow on unmount
+  useEffect(() => {
+    return () => {
+      setOverflow(element.id, false);
+    };
+  }, [element.id, setOverflow]);
+
+  // Check overflow while NOT editing
+  useEffect(() => {
+    if (element.type !== 'text' || isEditing) return;
+    if (!staticMeasureRef.current) return;
+
+    const el = staticMeasureRef.current;
+    const paddingMm = element.paddingMm ?? 2;
+    const paddingPx = paddingMm * MM_TO_PX;
+    const borderMm = element.borderMm ?? 0;
+    const borderPx = borderMm * MM_TO_PX;
+
+    const scrollH = el.scrollHeight;
+    const innerBoxH = (element.hMm * MM_TO_PX) - 2 * (paddingPx + borderPx);
+    const hasOverflow = scrollH > innerBoxH + 2;
+
+    handleOverflowChange(hasOverflow);
+  }, [element.type, isEditing, element.html, element.hMm, element.paddingMm, element.borderMm, handleOverflowChange]);
 
   const asset = assets.find((a) => a.id === element.assetId);
   const isLocked = Boolean(element.sliceIndex);
@@ -100,7 +132,7 @@ export function ElementBox({
         return;
       }
 
-      if (isInput) return;
+      if (isInput || Boolean(useUiStore.getState().multiImport)) return;
 
       if (e.key === 'Enter') {
         e.preventDefault();
@@ -122,6 +154,7 @@ export function ElementBox({
   // Cancel gesture on Escape
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (Boolean(useUiStore.getState().multiImport)) return;
       if (e.key === 'Escape') {
         if (isDraggingRef.current || isResizingRef.current) {
           isDraggingRef.current = false;
@@ -151,22 +184,14 @@ export function ElementBox({
   const formattedW = formatSize(currentW, jobSettings.unit);
   const formattedH = formatSize(currentH, jobSettings.unit);
 
-  const rotation = element.rotation || 0;
-  const fit = element.fit || 'cover';
-  const objectFit: React.CSSProperties['objectFit'] =
-    fit === 'stretch' ? 'fill' : fit;
 
-  // Inner rotation container dimensions
-  const innerW = mmToScreenPx(currentH, zoom);
-  const innerH = mmToScreenPx(currentW, zoom);
-  const innerLeft = (widthPx - innerW) / 2;
-  const innerTop = (heightPx - innerH) / 2;
 
   // 1) Drag to Move handler
   const handlePointerDownMove = (e: React.PointerEvent<HTMLDivElement>) => {
     const isTargetEditable = Boolean(
       (e.target as HTMLElement | null)?.closest?.('[contenteditable="true"]')
     );
+
     if (e.button !== 0 || isEditing || isTargetEditable) return;
     if (isLocked) {
       onSelect();
@@ -488,55 +513,7 @@ export function ElementBox({
     [clearGuides, draft, element, isEditing, jobId, page.id, updateElement]
   );
 
-  // Static text rendering when NOT editing
-  const renderStaticText = () => {
-    const vAlign = element.vAlign || 'top';
-    let justifyContent = 'flex-start';
-    if (vAlign === 'middle') justifyContent = 'center';
-    if (vAlign === 'bottom') justifyContent = 'flex-end';
 
-    const paddingPx = (element.paddingMm ?? 2) * MM_TO_PX;
-    const borderPx = (element.borderMm ?? 0) * MM_TO_PX;
-    const borderColor = element.borderColor || '#111111';
-    const fillColor = element.fillColor || 'transparent';
-
-    const baseWPx = currentW * MM_TO_PX;
-    const baseHPx = currentH * MM_TO_PX;
-
-    const isEmptyText = !element.html || element.html === '<p></p>' || element.html.trim() === '';
-
-    return (
-      <div
-        style={{
-          width: `${baseWPx}px`,
-          height: `${baseHPx}px`,
-          transform: `scale(${zoom})`,
-          transformOrigin: 'top left',
-          backgroundColor: fillColor,
-          borderWidth: `${borderPx}px`,
-          borderStyle: borderPx > 0 ? 'solid' : 'none',
-          borderColor: borderColor,
-          padding: `${paddingPx}px`,
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent,
-          boxSizing: 'border-box',
-        }}
-        className="sheet-text-container select-none pointer-events-none"
-      >
-        {isEmptyText ? (
-          <span className="text-sheet-muted italic no-print text-[14pt]">
-            Double-click to type
-          </span>
-        ) : (
-          <div
-            dangerouslySetInnerHTML={{ __html: element.html || '' }}
-            className="w-full"
-          />
-        )}
-      </div>
-    );
-  };
 
   const handleDoubleClick = (e: React.MouseEvent) => {
     if (element.type === 'text') {
@@ -563,6 +540,11 @@ export function ElementBox({
 
   return (
     <div
+      data-element-id={element.id}
+      onClick={(e) => {
+        e.stopPropagation();
+        onSelect();
+      }}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       onPointerDown={handlePointerDownMove}
@@ -579,99 +561,47 @@ export function ElementBox({
         isDraggingNow ? 'opacity-90' : 'opacity-100'
       }`}
     >
+      {/* Invisible static measuring container for text overflow when not editing */}
+      {element.type === 'text' && !isEditing && (
+        <div
+          ref={staticMeasureRef}
+          className="absolute inset-0 invisible pointer-events-none overflow-hidden"
+          aria-hidden="true"
+        >
+          <div
+            dangerouslySetInnerHTML={{ __html: element.html || '' }}
+            className="w-full"
+          />
+        </div>
+      )}
+
       {/* Content wrapper with overflow-hidden */}
       <div className={`relative w-full h-full overflow-hidden ${isEditing ? 'pointer-events-auto' : 'pointer-events-none'}`}>
-        {element.type === 'text' ? (
-          isEditing ? (
-            <TextBoxEditor
-              element={element}
-              pageH={pageH}
-              zoom={zoom}
-              isEditing={true}
-              onCommit={(newHtml, newHMm) => {
-                const patch: Partial<PageElement> = {};
-                let changed = false;
-                if (newHtml !== element.html) {
-                  patch.html = newHtml;
-                  changed = true;
-                }
-                if (newHMm !== undefined && Math.abs(newHMm - element.hMm) > 0.01) {
-                  patch.hMm = newHMm;
-                  changed = true;
-                }
-                if (changed) {
-                  updateElement(jobId, page.id, element.id, patch);
-                }
-              }}
-              onOverflowChange={setIsOverflow}
-            />
-          ) : (
-            renderStaticText()
-          )
-        ) : asset ? (
-          element.crop ? (
-            <div className="relative w-full h-full overflow-hidden pointer-events-none">
-              <img
-                src={asset.objectUrl}
-                alt=""
-                draggable={false}
-                style={{
-                  position: 'absolute',
-                  width: `${(1 / element.crop.w) * 100}%`,
-                  height: `${(1 / element.crop.h) * 100}%`,
-                  left: `${-(element.crop.x / element.crop.w) * 100}%`,
-                  top: `${-(element.crop.y / element.crop.h) * 100}%`,
-                  objectFit: 'fill',
-                  display: 'block',
-                }}
-                className="select-none pointer-events-none max-w-none max-h-none"
-              />
-            </div>
-          ) : rotation === 90 ? (
-            <div
-              style={{
-                width: `${innerW}px`,
-                height: `${innerH}px`,
-                left: `${innerLeft}px`,
-                top: `${innerTop}px`,
-                transform: 'rotate(90deg)',
-                transformOrigin: 'center',
-              }}
-              className="absolute pointer-events-none"
-            >
-              <img
-                src={asset.objectUrl}
-                alt=""
-                draggable={false}
-                style={{
-                  width: '100%',
-                  height: '100%',
-                  objectFit,
-                  objectPosition: 'center',
-                  display: 'block',
-                }}
-                className="select-none pointer-events-none"
-              />
-            </div>
-          ) : (
-            <img
-              src={asset.objectUrl}
-              alt=""
-              draggable={false}
-              style={{
-                width: '100%',
-                height: '100%',
-                objectFit,
-                objectPosition: 'center',
-                display: 'block',
-              }}
-              className="select-none pointer-events-none"
-            />
-          )
+        {element.type === 'text' && isEditing ? (
+          <TextBoxEditor
+            element={element}
+            pageH={pageH}
+            zoom={zoom}
+            isEditing={true}
+            onCommit={(newHtml, newHMm) => {
+              const patch: Partial<PageElement> = {};
+              let changed = false;
+              if (newHtml !== element.html) {
+                patch.html = newHtml;
+                changed = true;
+              }
+              if (newHMm !== undefined && Math.abs(newHMm - element.hMm) > 0.01) {
+                patch.hMm = newHMm;
+                changed = true;
+              }
+              if (changed) {
+                updateElement(jobId, page.id, element.id, patch);
+              }
+            }}
+            onOverflowChange={handleOverflowChange}
+          />
         ) : (
-          <div className="w-full h-full bg-sheet-blue/5 flex items-center justify-center text-sheet-muted text-xs">
-            Missing asset
-          </div>
+          <ElementContent element={element} asset={asset} zoom={zoom} />
         )}
       </div>
 

@@ -24,10 +24,10 @@ import { FONT_OPTIONS, FONT_SIZES, LINE_SPACINGS } from '@/lib/fonts';
 const BRAND_COLORS = [
   { name: 'Black', hex: '#111111' },
   { name: 'White', hex: '#FFFFFF' },
-  { name: 'Red', hex: '#E5322D' },
-  { name: 'Blue', hex: '#1F5FBF' },
-  { name: 'Green', hex: '#1E9E55' },
-  { name: 'Yellow', hex: '#F2B705' },
+  { name: 'Red', hex: '#E8262B' },
+  { name: 'Blue', hex: '#1B9BF0' },
+  { name: 'Green', hex: '#1DAA2F' },
+  { name: 'Yellow', hex: '#FFD500' },
   { name: 'Gray', hex: '#6B6B6B' },
 ];
 
@@ -182,13 +182,10 @@ export function TextToolbar() {
     });
   };
 
+  if (!isTextSelected) return null;
+
   return (
     <div className="h-10 shrink-0 bg-paper border-b border-line px-3 flex items-center gap-1.5 select-none text-xs text-ink z-20 overflow-x-auto">
-      {!isTextSelected ? (
-        <span className="text-muted text-xs italic">
-          Select a text box to format text
-        </span>
-      ) : (
         <>
           {/* Font Family Select */}
           <select
@@ -527,7 +524,6 @@ export function TextToolbar() {
             <RemoveFormatting className="w-3.5 h-3.5" />
           </button>
         </>
-      )}
     </div>
   );
 }

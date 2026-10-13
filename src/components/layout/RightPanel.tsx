@@ -1,21 +1,22 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Lock, Unlock } from 'lucide-react';
+import { Lock, Unlock, ChevronDown } from 'lucide-react';
 import { useSessionStore } from '@/store/useSessionStore';
 import { useUiStore } from '@/store/useUiStore';
 import { mmToUnit, unitToMm } from '@/lib/units';
 import { Button } from '@/components/ui/Button';
 import { Tooltip } from '@/components/ui/Tooltip';
+import { getEffectiveDpi } from '@/lib/quality';
 import type { PageElement, ImageAsset, Job, Unit } from '@/types';
 
 const BRAND_COLORS = [
   { name: 'Black', hex: '#111111' },
   { name: 'White', hex: '#FFFFFF' },
-  { name: 'Red', hex: '#E5322D' },
-  { name: 'Blue', hex: '#1F5FBF' },
-  { name: 'Green', hex: '#1E9E55' },
-  { name: 'Yellow', hex: '#F2B705' },
+  { name: 'Red', hex: '#E8262B' },
+  { name: 'Blue', hex: '#1B9BF0' },
+  { name: 'Green', hex: '#1DAA2F' },
+  { name: 'Yellow', hex: '#FFD500' },
   { name: 'Gray', hex: '#6B6B6B' },
 ];
 
@@ -29,22 +30,16 @@ function QualityBadge({ dpi }: QualityBadgeProps) {
 
   if (dpi < 120) {
     dotColor = 'bg-red';
-    qualityLabel = 'Low resolution, will look blurry';
+    qualityLabel = 'May look blurry';
   } else if (dpi < 200) {
     dotColor = 'bg-yellow';
-    qualityLabel = 'OK, may look soft';
+    qualityLabel = 'OK';
   }
-
-  const dpiText =
-    Math.round(dpi * 10) / 10 === Math.round(dpi)
-      ? Math.round(dpi).toString()
-      : (Math.round(dpi * 10) / 10).toFixed(1);
 
   return (
     <div className="flex items-center gap-2 text-xs">
       <span className={`w-2 h-2 rounded-full shrink-0 ${dotColor}`} />
-      <span className="font-medium text-ink">{dpiText} DPI</span>
-      <span className="text-muted truncate">· {qualityLabel}</span>
+      <span className="font-medium text-ink">{qualityLabel}</span>
     </div>
   );
 }
@@ -122,29 +117,8 @@ function ElementInspectorForm({
   const [valPadding, setValPadding] = useState(initialPadding);
   const [valBorder, setValBorder] = useState(initialBorder);
 
-  // DPI calculation for images
-  let dpi = 0;
-  if (asset && asset.pxW > 0 && asset.pxH > 0) {
-    if (element.crop) {
-      const scale = Math.max(
-        element.wMm / (element.crop.w * asset.pxW),
-        element.hMm / (element.crop.h * asset.pxH)
-      );
-      dpi = scale > 0 ? 25.4 / scale : 0;
-    } else {
-      const rotation = element.rotation || 0;
-      const cellW_mm = rotation === 90 ? element.hMm : element.wMm;
-      const cellH_mm = rotation === 90 ? element.wMm : element.hMm;
-
-      const scale =
-        element.fit === 'contain'
-          ? Math.min(cellW_mm / asset.pxW, cellH_mm / asset.pxH)
-          : Math.max(cellW_mm / asset.pxW, cellH_mm / asset.pxH);
-
-      dpi = scale > 0 ? 25.4 / scale : 0;
-    }
-  }
-
+  // Quality calculation for images
+  const dpi = isText ? 0 : getEffectiveDpi(element, asset);
   const currentFit = element.fit || 'cover';
   const minSizeMm = isText ? 10 : 5;
 
@@ -237,351 +211,39 @@ function ElementInspectorForm({
           </div>
         )}
         <div className="flex flex-col min-w-0">
-          <h2 className="text-xs font-semibold text-ink truncate" title={isText ? 'Text box' : asset?.name}>
+          <h2
+            className="text-xs font-semibold text-ink truncate"
+            title={isText ? 'Text box' : asset?.name}
+          >
             {isText ? 'Text Box' : asset?.name || 'Selected Element'}
           </h2>
-          <span className="text-[11px] text-muted">{element.type}</span>
+          {!isText && (
+            <div className="mt-1">
+              <QualityBadge dpi={dpi} />
+            </div>
+          )}
           {isSliced && (
-            <span className="text-[11px] font-medium text-blue">
+            <span className="text-[11px] font-medium text-blue mt-0.5">
               Slice {element.sliceIndex} of {element.sliceCount}
             </span>
           )}
         </div>
       </div>
 
-      {/* Slices Locked Note */}
       {isSliced && (
         <p className="text-[11px] text-muted italic">
           Slices are locked so pages line up
         </p>
       )}
 
-      {/* Editable Geometry Section (X, Y, W, H) */}
-      <section className="flex flex-col gap-2 p-3 rounded-[8px] bg-surface border border-line text-xs">
-        {/* Position: X & Y */}
-        <div className="grid grid-cols-2 gap-2">
-          <div className="flex flex-col gap-1">
-            <label className="text-[10px] text-muted font-medium">X ({unit})</label>
-            <input
-              type="number"
-              step="any"
-              disabled={isSliced}
-              value={valX}
-              onChange={(e) => setValX(e.target.value)}
-              onBlur={() => applyField('x')}
-              onKeyDown={(e) => handleKeyDownField(e, 'x')}
-              className="w-full px-2 py-1 text-xs rounded-[6px] border border-line bg-paper text-ink focus:outline-none focus:border-blue disabled:opacity-50 disabled:cursor-not-allowed font-mono"
-            />
-          </div>
-
-          <div className="flex flex-col gap-1">
-            <label className="text-[10px] text-muted font-medium">Y ({unit})</label>
-            <input
-              type="number"
-              step="any"
-              disabled={isSliced}
-              value={valY}
-              onChange={(e) => setValY(e.target.value)}
-              onBlur={() => applyField('y')}
-              onKeyDown={(e) => handleKeyDownField(e, 'y')}
-              className="w-full px-2 py-1 text-xs rounded-[6px] border border-line bg-paper text-ink focus:outline-none focus:border-blue disabled:opacity-50 disabled:cursor-not-allowed font-mono"
-            />
-          </div>
-        </div>
-
-        {/* Dimensions: W, Lock (for images only), H */}
-        <div className="flex items-center gap-1.5">
-          <div className="flex-1 flex flex-col gap-1">
-            <label className="text-[10px] text-muted font-medium">W ({unit})</label>
-            <input
-              type="number"
-              step="any"
-              disabled={isSliced}
-              value={valW}
-              onChange={(e) => setValW(e.target.value)}
-              onBlur={() => applyField('w')}
-              onKeyDown={(e) => handleKeyDownField(e, 'w')}
-              className="w-full px-2 py-1 text-xs rounded-[6px] border border-line bg-paper text-ink focus:outline-none focus:border-blue disabled:opacity-50 disabled:cursor-not-allowed font-mono"
-            />
-          </div>
-
-          {!isText && (
-            <button
-              type="button"
-              disabled={isSliced}
-              onClick={toggleAspectLock}
-              title={aspectLock ? 'Aspect ratio locked' : 'Aspect ratio unlocked'}
-              className={`mt-4 p-1.5 rounded-[6px] border transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
-                aspectLock
-                  ? 'border-blue bg-blue/10 text-blue'
-                  : 'border-line bg-paper text-muted hover:text-ink'
-              }`}
-            >
-              {aspectLock ? (
-                <Lock className="w-3.5 h-3.5" />
-              ) : (
-                <Unlock className="w-3.5 h-3.5" />
-              )}
-            </button>
-          )}
-
-          <div className="flex-1 flex flex-col gap-1">
-            <label className="text-[10px] text-muted font-medium">H ({unit})</label>
-            <input
-              type="number"
-              step="any"
-              disabled={isSliced}
-              value={valH}
-              onChange={(e) => setValH(e.target.value)}
-              onBlur={() => applyField('h')}
-              onKeyDown={(e) => handleKeyDownField(e, 'h')}
-              className="w-full px-2 py-1 text-xs rounded-[6px] border border-line bg-paper text-ink focus:outline-none focus:border-blue disabled:opacity-50 disabled:cursor-not-allowed font-mono"
-            />
-          </div>
-        </div>
-      </section>
-
-      {/* Page Select Section */}
-      <section className="flex flex-col gap-1 text-xs">
-        <label className="text-[10px] text-muted font-medium">Page</label>
-        <select
-          disabled={isSliced}
-          value={pageId}
-          onChange={(e) =>
-            moveElementToPage(job.id, pageId, e.target.value, element.id)
-          }
-          className="w-full px-2 py-1 text-xs rounded-[6px] border border-line bg-paper text-ink focus:outline-none focus:border-blue disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {job.pages.map((p, idx) => (
-            <option key={p.id} value={p.id}>
-              Page {idx + 1}
-            </option>
-          ))}
-        </select>
-      </section>
-
-      {/* Text Specific Settings */}
-      {isText && (
-        <>
-          {/* Vertical Align Segmented */}
-          <section className="flex flex-col gap-1.5">
-            <span className="text-[11px] font-semibold text-muted uppercase tracking-wider">
-              Vertical Align
-            </span>
-            <div className="grid grid-cols-3 p-0.5 rounded-[8px] bg-surface border border-line text-xs font-medium">
-              {(['top', 'middle', 'bottom'] as const).map((align) => (
-                <button
-                  key={align}
-                  type="button"
-                  onClick={() =>
-                    updateElement(job.id, pageId, element.id, { vAlign: align })
-                  }
-                  className={`py-1 text-center rounded-[6px] capitalize transition-colors cursor-pointer ${
-                    (element.vAlign || 'top') === align
-                      ? 'bg-paper text-ink shadow-xs'
-                      : 'text-muted hover:text-ink'
-                  }`}
-                >
-                  {align}
-                </button>
-              ))}
-            </div>
-          </section>
-
-          {/* Padding */}
-          <section className="flex flex-col gap-1">
-            <label className="text-[10px] text-muted font-medium">Padding ({unit})</label>
-            <input
-              type="number"
-              step="any"
-              min={0}
-              value={valPadding}
-              onChange={(e) => setValPadding(e.target.value)}
-              onBlur={() => applyField('padding')}
-              onKeyDown={(e) => handleKeyDownField(e, 'padding')}
-              className="w-full px-2 py-1 text-xs rounded-[6px] border border-line bg-paper text-ink focus:outline-none focus:border-blue font-mono"
-            />
-          </section>
-
-          {/* Fill Color */}
-          <section className="flex flex-col gap-1.5">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] text-muted font-medium">Fill Color</span>
-              <button
-                type="button"
-                onClick={() =>
-                  updateElement(job.id, pageId, element.id, { fillColor: null })
-                }
-                className="text-[10px] text-red hover:underline cursor-pointer"
-              >
-                None
-              </button>
-            </div>
-            <div className="flex items-center gap-1.5 flex-wrap">
-              {BRAND_COLORS.map((c) => (
-                <button
-                  key={c.hex}
-                  type="button"
-                  onClick={() =>
-                    updateElement(job.id, pageId, element.id, { fillColor: c.hex })
-                  }
-                  className="w-5 h-5 rounded-[4px] border border-line cursor-pointer hover:scale-110 transition-transform"
-                  style={{ backgroundColor: c.hex }}
-                  title={c.name}
-                />
-              ))}
-              <input
-                type="color"
-                value={element.fillColor || '#ffffff'}
-                onChange={(e) =>
-                  updateElement(job.id, pageId, element.id, { fillColor: e.target.value })
-                }
-                className="w-5 h-5 p-0 border border-line rounded cursor-pointer"
-                title="Custom color"
-              />
-            </div>
-          </section>
-
-          {/* Border Width & Color */}
-          <section className="flex flex-col gap-1.5">
-            <label className="text-[10px] text-muted font-medium">Border ({unit})</label>
-            <input
-              type="number"
-              step="any"
-              min={0}
-              value={valBorder}
-              onChange={(e) => setValBorder(e.target.value)}
-              onBlur={() => applyField('border')}
-              onKeyDown={(e) => handleKeyDownField(e, 'border')}
-              className="w-full px-2 py-1 text-xs rounded-[6px] border border-line bg-paper text-ink focus:outline-none focus:border-blue font-mono"
-            />
-            <div className="flex items-center gap-1.5 flex-wrap pt-1">
-              {BRAND_COLORS.map((c) => (
-                <button
-                  key={c.hex}
-                  type="button"
-                  onClick={() =>
-                    updateElement(job.id, pageId, element.id, { borderColor: c.hex })
-                  }
-                  className="w-5 h-5 rounded-[4px] border border-line cursor-pointer hover:scale-110 transition-transform"
-                  style={{ backgroundColor: c.hex }}
-                  title={c.name}
-                />
-              ))}
-            </div>
-          </section>
-
-          {/* Auto-Grow Height Checkbox */}
-          <label className="flex items-center gap-2 cursor-pointer text-xs">
-            <input
-              type="checkbox"
-              checked={element.autoGrow ?? true}
-              onChange={(e) =>
-                updateElement(job.id, pageId, element.id, { autoGrow: e.target.checked })
-              }
-              className="rounded-[4px] border-line text-blue focus:ring-0 cursor-pointer"
-            />
-            <span>Auto-grow height</span>
-          </label>
-        </>
-      )}
-
-      {/* Resolution Quality for Images */}
-      {!isText && (
-        <section className="flex flex-col gap-1.5">
-          <span className="text-[11px] font-semibold text-muted uppercase tracking-wider">
-            Resolution Quality
-          </span>
-          <div className="p-2.5 rounded-[8px] bg-surface border border-line">
-            <QualityBadge dpi={dpi} />
-          </div>
-        </section>
-      )}
-
-      {/* Fit Segmented Control for Images */}
-      {!isText && !isSliced && (
-        <section className="flex flex-col gap-1.5">
-          <span className="text-[11px] font-semibold text-muted uppercase tracking-wider">
-            Fit mode
-          </span>
-          <div className="grid grid-cols-2 p-0.5 rounded-[8px] bg-surface border border-line text-xs font-medium">
-            <button
-              type="button"
-              onClick={() =>
-                updateElement(job.id, pageId, element.id, { fit: 'cover' })
-              }
-              className={`py-1 px-2 text-center rounded-[6px] transition-colors cursor-pointer ${
-                currentFit === 'cover'
-                  ? 'bg-paper text-ink shadow-xs'
-                  : 'text-muted hover:text-ink'
-              }`}
-            >
-              Fill
-            </button>
-            <button
-              type="button"
-              onClick={() =>
-                updateElement(job.id, pageId, element.id, { fit: 'contain' })
-              }
-              className={`py-1 px-2 text-center rounded-[6px] transition-colors cursor-pointer ${
-                currentFit === 'contain'
-                  ? 'bg-paper text-ink shadow-xs'
-                  : 'text-muted hover:text-ink'
-              }`}
-            >
-              Fit
-            </button>
-          </div>
-        </section>
-      )}
-
-      {/* Action Buttons & Layers */}
-      <section className="flex flex-col gap-2 pt-1 mt-auto">
-        {/* Layer order buttons */}
-        <div className="grid grid-cols-2 gap-1.5">
-          <Button
-            variant="outline"
-            disabled={isSliced}
-            onClick={() => bringForward(job.id, pageId, element.id)}
-            className="text-xs"
-          >
-            Bring forward
-          </Button>
-          <Button
-            variant="outline"
-            disabled={isSliced}
-            onClick={() => sendBackward(job.id, pageId, element.id)}
-            className="text-xs"
-          >
-            Send backward
-          </Button>
-        </div>
-        <div className="flex items-center justify-between px-1 text-[11px]">
-          <button
-            type="button"
-            disabled={isSliced}
-            onClick={() => bringToFront(job.id, pageId, element.id)}
-            className="text-muted hover:text-ink hover:underline cursor-pointer disabled:opacity-50"
-          >
-            Bring to front
-          </button>
-          <button
-            type="button"
-            disabled={isSliced}
-            onClick={() => sendToBack(job.id, pageId, element.id)}
-            className="text-muted hover:text-ink hover:underline cursor-pointer disabled:opacity-50"
-          >
-            Send to back
-          </button>
-        </div>
-
-        {/* Rotate 90° for image elements only */}
+      {/* Primary Action Buttons */}
+      <div className="flex flex-col gap-2">
         {!isText && (
           isSliced ? (
             <Tooltip content="Sliced pages can't be rotated" className="w-full">
               <div className="w-full">
-                <Button variant="outline" disabled className="w-full">
-                  Rotate 90°
+                <Button variant="outline" disabled className="w-full h-[40px]">
+                  Rotate
                 </Button>
               </div>
             </Tooltip>
@@ -589,9 +251,9 @@ function ElementInspectorForm({
             <Button
               variant="outline"
               onClick={() => rotateElement(job.id, pageId, element.id)}
-              className="w-full"
+              className="w-full h-[40px]"
             >
-              Rotate 90°
+              Rotate
             </Button>
           )
         )}
@@ -605,7 +267,7 @@ function ElementInspectorForm({
               select({ pageId, elementId: newId });
             }
           }}
-          className="w-full"
+          className="w-full h-[40px]"
         >
           Duplicate
         </Button>
@@ -617,11 +279,333 @@ function ElementInspectorForm({
             removeElement(job.id, pageId, element.id);
             clearSelection();
           }}
-          className="w-full text-center text-xs font-medium text-red hover:underline py-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:no-underline"
+          className="w-full h-[40px] flex items-center justify-center text-sm font-medium text-red hover:underline cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:no-underline"
         >
           Delete
         </button>
-      </section>
+      </div>
+
+      {/* Collapsed Details: More */}
+      <details className="group border-t border-line pt-3 mt-1">
+        <summary className="text-[12px] font-semibold text-muted uppercase tracking-wider cursor-pointer select-none py-1 flex items-center justify-between">
+          <span>More</span>
+          <ChevronDown className="w-3.5 h-3.5 group-open:rotate-180 transition-transform" />
+        </summary>
+
+        <div className="mt-3 flex flex-col gap-4 text-xs">
+          {/* Position & Size */}
+          <section className="flex flex-col gap-2 p-3 rounded-[8px] bg-surface border border-line">
+            <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">
+              Geometry
+            </span>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] text-muted font-medium">X ({unit})</label>
+                <input
+                  type="number"
+                  step="any"
+                  disabled={isSliced}
+                  value={valX}
+                  onChange={(e) => setValX(e.target.value)}
+                  onBlur={() => applyField('x')}
+                  onKeyDown={(e) => handleKeyDownField(e, 'x')}
+                  className="w-full px-2 py-1 text-xs rounded-[6px] border border-line bg-paper text-ink focus:outline-none focus:border-blue disabled:opacity-50 disabled:cursor-not-allowed font-mono"
+                />
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] text-muted font-medium">Y ({unit})</label>
+                <input
+                  type="number"
+                  step="any"
+                  disabled={isSliced}
+                  value={valY}
+                  onChange={(e) => setValY(e.target.value)}
+                  onBlur={() => applyField('y')}
+                  onKeyDown={(e) => handleKeyDownField(e, 'y')}
+                  className="w-full px-2 py-1 text-xs rounded-[6px] border border-line bg-paper text-ink focus:outline-none focus:border-blue disabled:opacity-50 disabled:cursor-not-allowed font-mono"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <div className="flex-1 flex flex-col gap-1">
+                <label className="text-[10px] text-muted font-medium">W ({unit})</label>
+                <input
+                  type="number"
+                  step="any"
+                  disabled={isSliced}
+                  value={valW}
+                  onChange={(e) => setValW(e.target.value)}
+                  onBlur={() => applyField('w')}
+                  onKeyDown={(e) => handleKeyDownField(e, 'w')}
+                  className="w-full px-2 py-1 text-xs rounded-[6px] border border-line bg-paper text-ink focus:outline-none focus:border-blue disabled:opacity-50 disabled:cursor-not-allowed font-mono"
+                />
+              </div>
+
+              {!isText && (
+                <button
+                  type="button"
+                  disabled={isSliced}
+                  onClick={toggleAspectLock}
+                  title={aspectLock ? 'Aspect ratio locked' : 'Aspect ratio unlocked'}
+                  className={`mt-4 p-1.5 rounded-[6px] border transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
+                    aspectLock
+                      ? 'border-blue bg-blue/10 text-blue'
+                      : 'border-line bg-paper text-muted hover:text-ink'
+                  }`}
+                >
+                  {aspectLock ? (
+                    <Lock className="w-3.5 h-3.5" />
+                  ) : (
+                    <Unlock className="w-3.5 h-3.5" />
+                  )}
+                </button>
+              )}
+
+              <div className="flex-1 flex flex-col gap-1">
+                <label className="text-[10px] text-muted font-medium">H ({unit})</label>
+                <input
+                  type="number"
+                  step="any"
+                  disabled={isSliced}
+                  value={valH}
+                  onChange={(e) => setValH(e.target.value)}
+                  onBlur={() => applyField('h')}
+                  onKeyDown={(e) => handleKeyDownField(e, 'h')}
+                  className="w-full px-2 py-1 text-xs rounded-[6px] border border-line bg-paper text-ink focus:outline-none focus:border-blue disabled:opacity-50 disabled:cursor-not-allowed font-mono"
+                />
+              </div>
+            </div>
+          </section>
+
+          {/* Fit Mode for Images */}
+          {!isText && !isSliced && (
+            <section className="flex flex-col gap-1.5">
+              <span className="text-[11px] font-semibold text-muted uppercase tracking-wider">
+                Fit mode
+              </span>
+              <div className="grid grid-cols-2 p-0.5 rounded-[8px] bg-surface border border-line text-xs font-medium">
+                <button
+                  type="button"
+                  onClick={() =>
+                    updateElement(job.id, pageId, element.id, { fit: 'cover' })
+                  }
+                  className={`py-1 px-2 text-center rounded-[6px] transition-colors cursor-pointer ${
+                    currentFit === 'cover'
+                      ? 'bg-paper text-ink shadow-xs'
+                      : 'text-muted hover:text-ink'
+                  }`}
+                >
+                  Fill
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    updateElement(job.id, pageId, element.id, { fit: 'contain' })
+                  }
+                  className={`py-1 px-2 text-center rounded-[6px] transition-colors cursor-pointer ${
+                    currentFit === 'contain'
+                      ? 'bg-paper text-ink shadow-xs'
+                      : 'text-muted hover:text-ink'
+                  }`}
+                >
+                  Fit
+                </button>
+              </div>
+            </section>
+          )}
+
+          {/* Page Select */}
+          <section className="flex flex-col gap-1">
+            <label className="text-[10px] text-muted font-medium">Page</label>
+            <select
+              disabled={isSliced}
+              value={pageId}
+              onChange={(e) =>
+                moveElementToPage(job.id, pageId, e.target.value, element.id)
+              }
+              className="w-full px-2 py-1 text-xs rounded-[6px] border border-line bg-paper text-ink focus:outline-none focus:border-blue disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {job.pages.map((p, idx) => (
+                <option key={p.id} value={p.id}>
+                  Page {idx + 1}
+                </option>
+              ))}
+            </select>
+          </section>
+
+          {/* Text-specific settings */}
+          {isText && (
+            <>
+              {/* Vertical Align */}
+              <section className="flex flex-col gap-1.5">
+                <span className="text-[11px] font-semibold text-muted uppercase tracking-wider">
+                  Vertical Align
+                </span>
+                <div className="grid grid-cols-3 p-0.5 rounded-[8px] bg-surface border border-line text-xs font-medium">
+                  {(['top', 'middle', 'bottom'] as const).map((align) => (
+                    <button
+                      key={align}
+                      type="button"
+                      onClick={() =>
+                        updateElement(job.id, pageId, element.id, { vAlign: align })
+                      }
+                      className={`py-1 text-center rounded-[6px] capitalize transition-colors cursor-pointer ${
+                        (element.vAlign || 'top') === align
+                          ? 'bg-paper text-ink shadow-xs'
+                          : 'text-muted hover:text-ink'
+                      }`}
+                    >
+                      {align}
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              {/* Padding */}
+              <section className="flex flex-col gap-1">
+                <label className="text-[10px] text-muted font-medium">Padding ({unit})</label>
+                <input
+                  type="number"
+                  step="any"
+                  min={0}
+                  value={valPadding}
+                  onChange={(e) => setValPadding(e.target.value)}
+                  onBlur={() => applyField('padding')}
+                  onKeyDown={(e) => handleKeyDownField(e, 'padding')}
+                  className="w-full px-2 py-1 text-xs rounded-[6px] border border-line bg-paper text-ink focus:outline-none focus:border-blue font-mono"
+                />
+              </section>
+
+              {/* Fill Color */}
+              <section className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-muted font-medium">Fill Color</span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateElement(job.id, pageId, element.id, { fillColor: null })
+                    }
+                    className="text-[10px] text-red hover:underline cursor-pointer"
+                  >
+                    None
+                  </button>
+                </div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {BRAND_COLORS.map((c) => (
+                    <button
+                      key={c.hex}
+                      type="button"
+                      onClick={() =>
+                        updateElement(job.id, pageId, element.id, { fillColor: c.hex })
+                      }
+                      className="w-5 h-5 rounded-[4px] border border-line cursor-pointer hover:scale-110 transition-transform"
+                      style={{ backgroundColor: c.hex }}
+                      title={c.name}
+                    />
+                  ))}
+                  <input
+                    type="color"
+                    value={element.fillColor || '#ffffff'}
+                    onChange={(e) =>
+                      updateElement(job.id, pageId, element.id, { fillColor: e.target.value })
+                    }
+                    className="w-5 h-5 p-0 border border-line rounded cursor-pointer"
+                    title="Custom color"
+                  />
+                </div>
+              </section>
+
+              {/* Border Width & Color */}
+              <section className="flex flex-col gap-1.5">
+                <label className="text-[10px] text-muted font-medium">Border ({unit})</label>
+                <input
+                  type="number"
+                  step="any"
+                  min={0}
+                  value={valBorder}
+                  onChange={(e) => setValBorder(e.target.value)}
+                  onBlur={() => applyField('border')}
+                  onKeyDown={(e) => handleKeyDownField(e, 'border')}
+                  className="w-full px-2 py-1 text-xs rounded-[6px] border border-line bg-paper text-ink focus:outline-none focus:border-blue font-mono"
+                />
+                <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                  {BRAND_COLORS.map((c) => (
+                    <button
+                      key={c.hex}
+                      type="button"
+                      onClick={() =>
+                        updateElement(job.id, pageId, element.id, { borderColor: c.hex })
+                      }
+                      className="w-5 h-5 rounded-[4px] border border-line cursor-pointer hover:scale-110 transition-transform"
+                      style={{ backgroundColor: c.hex }}
+                      title={c.name}
+                    />
+                  ))}
+                </div>
+              </section>
+
+              {/* Auto-Grow Height */}
+              <label className="flex items-center gap-2 cursor-pointer text-xs">
+                <input
+                  type="checkbox"
+                  checked={element.autoGrow ?? true}
+                  onChange={(e) =>
+                    updateElement(job.id, pageId, element.id, { autoGrow: e.target.checked })
+                  }
+                  className="rounded-[4px] border-line text-blue focus:ring-0 cursor-pointer"
+                />
+                <span>Auto-grow height</span>
+              </label>
+            </>
+          )}
+
+          {/* Layer order buttons */}
+          <section className="flex flex-col gap-2 pt-1 border-t border-line">
+            <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">
+              Layers
+            </span>
+            <div className="grid grid-cols-2 gap-1.5">
+              <Button
+                variant="outline"
+                disabled={isSliced}
+                onClick={() => bringForward(job.id, pageId, element.id)}
+                className="text-xs"
+              >
+                Bring forward
+              </Button>
+              <Button
+                variant="outline"
+                disabled={isSliced}
+                onClick={() => sendBackward(job.id, pageId, element.id)}
+                className="text-xs"
+              >
+                Send backward
+              </Button>
+            </div>
+            <div className="flex items-center justify-between px-1 text-[11px]">
+              <button
+                type="button"
+                disabled={isSliced}
+                onClick={() => bringToFront(job.id, pageId, element.id)}
+                className="text-muted hover:text-ink hover:underline cursor-pointer disabled:opacity-50"
+              >
+                Bring to front
+              </button>
+              <button
+                type="button"
+                disabled={isSliced}
+                onClick={() => sendToBack(job.id, pageId, element.id)}
+                className="text-muted hover:text-ink hover:underline cursor-pointer disabled:opacity-50"
+              >
+                Send to back
+              </button>
+            </div>
+          </section>
+        </div>
+      </details>
     </aside>
   );
 }
@@ -645,7 +629,6 @@ export function RightPanel() {
   const {
     selected,
     select,
-    activePageId,
     clearSelection,
     aspectLock,
     toggleAspectLock,
@@ -657,7 +640,6 @@ export function RightPanel() {
   const selectedPageId = selected?.pageId;
   const selectedElementId = selected?.elementId;
 
-  // Selected element lookup
   const selectedPage = selectedPageId
     ? activeJob.pages.find((p) => p.id === selectedPageId)
     : null;
@@ -669,22 +651,10 @@ export function RightPanel() {
     ? assets.find((a) => a.id === selectedElement.assetId)
     : null;
 
-  // Empty state calculations
-  const activePage =
-    activeJob.pages.find((p) => p.id === activePageId) || activeJob.pages[0];
-  const itemsOnThisPage = activePage ? activePage.elements.length : 0;
-  const totalItems = activeJob.pages.reduce(
-    (acc, p) => acc + p.elements.length,
-    0
-  );
-
   if (!selected || !selectedPage || !selectedElement) {
     return (
       <aside className="w-[280px] shrink-0 bg-paper border-l border-line p-4 flex flex-col items-center justify-center text-center select-none text-ink">
-        <p className="text-xs text-muted mb-1.5">Select an item to edit</p>
-        <p className="text-xs text-muted">
-          {itemsOnThisPage} items on this page · {totalItems} total
-        </p>
+        <p className="text-xs text-muted">Click a picture to edit it.</p>
       </aside>
     );
   }

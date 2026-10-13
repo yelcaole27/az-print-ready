@@ -7,6 +7,7 @@ import { getPageDimensionsMm, mmToScreenPx } from '@/lib/pageGeometry';
 import { formatSize } from '@/lib/units';
 import { useUiStore } from '@/store/useUiStore';
 import { ElementBox } from './ElementBox';
+import { CutGuides } from './CutGuides';
 
 export interface PageViewProps {
   page: Page;
@@ -39,12 +40,20 @@ export function PageView({
 
   const pageWidthPx = mmToScreenPx(wMm, zoom);
   const pageHeightPx = mmToScreenPx(hMm, zoom);
-  const marginPx = mmToScreenPx(jobSettings.marginMm, zoom);
+  const effectiveMarginMm = jobSettings.borderless ? 0 : jobSettings.marginMm;
+  const marginPx = mmToScreenPx(effectiveMarginMm, zoom);
 
   const formattedWidth = formatSize(wMm, jobSettings.unit);
   const formattedHeight = formatSize(hMm, jobSettings.unit);
 
-  const handlePageClick = () => {
+  const handlePageClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    // Only deselect when clicking on the page background itself
+    if (e.target !== e.currentTarget) {
+      const target = e.target as HTMLElement;
+      if (target.closest('[data-element-id]')) {
+        return;
+      }
+    }
     useUiStore.getState().setEditingElement(null);
     clearSelection();
     onSelect();
@@ -65,7 +74,7 @@ export function PageView({
         }`}
       >
         {/* Margin Guides */}
-        {showMargins && (
+        {showMargins && !jobSettings.borderless && effectiveMarginMm > 0 && (
           <div
             style={{
               top: `${marginPx}px`,
@@ -99,6 +108,13 @@ export function PageView({
             );
           })}
 
+        {/* Cut Guides */}
+        <CutGuides
+          page={page}
+          settings={jobSettings}
+          scale={mmToScreenPx(1, zoom)}
+        />
+
         {/* Page Elements */}
         {page.elements.map((el) => {
           const isSelected =
@@ -114,6 +130,9 @@ export function PageView({
               isSelected={isSelected}
               onSelect={() => {
                 select({ pageId: page.id, elementId: el.id });
+                if (el.assetId) {
+                  useUiStore.getState().setActiveAssetId(el.assetId);
+                }
                 onSelect();
               }}
             />

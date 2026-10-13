@@ -13,12 +13,26 @@ export interface UiMessage {
   text: string;
 }
 
+export interface MultiImportCard {
+  id: string;
+  assetIds: string[];
+}
+
+export interface MultiImportState {
+  step: 'arrange' | 'layout';
+  batchAssetIds: string[];
+  cards: MultiImportCard[];
+  layoutStepIndex: number;
+  chosenLayouts: Record<string, 'best' | 'grid' | 'column' | 'row'>;
+}
+
 interface UiState {
   zoom: number;
   zoomMode: ZoomMode;
   showMargins: boolean;
   activePageId: string | null;
   theme: AppTheme;
+  sidebarCollapsed: boolean;
 
   // Asset and Selection
   activeAssetId: string | null;
@@ -52,15 +66,45 @@ interface UiState {
   activeEditor: unknown | null;
   editingElement: { pageId: string; elementId: string } | null;
 
+  // Text overflow tracking
+  overflowIds: Set<string>;
+
+  // Phase 7 Print and Export State
+  outputMode: null | 'print' | 'export';
+  exportProgress: { done: number; total: number } | null;
+  checkNotice: { action: 'print' | 'export'; lines: string[] } | null;
+
+  // Multi-image import flow
+  multiImport: MultiImportState | null;
+
+  // Collage Block Layout Modal
+  editingBlockLayoutId: string | null;
+
   // Inline Message Banner
   message: UiMessage | null;
+
+  setEditingBlockLayoutId: (id: string | null) => void;
+
+  setMultiImport: (
+    val:
+      | MultiImportState
+      | null
+      | ((prev: MultiImportState | null) => MultiImportState | null)
+  ) => void;
+  setOverflow: (elementId: string, isOverflow: boolean) => void;
+  setOutputMode: (mode: null | 'print' | 'export') => void;
+  setExportProgress: (progress: { done: number; total: number } | null) => void;
+  setCheckNotice: (notice: { action: 'print' | 'export'; lines: string[] } | null) => void;
 
   setZoom: (zoom: number) => void;
   setZoomMode: (mode: ZoomMode) => void;
   toggleMargins: () => void;
   setActivePage: (id: string | null) => void;
   setTheme: (theme: AppTheme) => void;
+  toggleTheme: () => void;
   initTheme: () => void;
+  setSidebarCollapsed: (collapsed: boolean) => void;
+  toggleSidebar: () => void;
 
   setActiveAssetId: (id: string | null) => void;
   select: (sel: { pageId: string; elementId: string } | null) => void;
@@ -141,6 +185,7 @@ export const useUiStore = create<UiState>((set) => ({
   showMargins: true,
   activePageId: null,
   theme: 'system',
+  sidebarCollapsed: false,
 
   activeAssetId: null,
   selected: null,
@@ -168,7 +213,18 @@ export const useUiStore = create<UiState>((set) => ({
   activeEditor: null,
   editingElement: null,
 
+  overflowIds: new Set<string>(),
+  outputMode: null,
+  exportProgress: null,
+  checkNotice: null,
+  multiImport: null,
+  editingBlockLayoutId: null,
+
   message: null,
+
+  setEditingBlockLayoutId: (id: string | null) => {
+    set({ editingBlockLayoutId: id });
+  },
 
   setZoom: (zoom: number) => {
     const clamped = Math.min(4, Math.max(0.25, Math.round(zoom * 100) / 100));
@@ -198,11 +254,36 @@ export const useUiStore = create<UiState>((set) => ({
     setupSystemThemeListener(theme === 'system');
   },
 
+  toggleTheme: () => {
+    const current = getStoredTheme();
+    // In light mode (or system when resolving to light), toggle to dark; otherwise toggle to light
+    const isDark = typeof document !== 'undefined'
+      ? document.documentElement.dataset.theme === 'dark'
+      : current === 'dark';
+    const nextTheme: AppTheme = isDark ? 'light' : 'dark';
+    set({ theme: nextTheme });
+    try {
+      localStorage.setItem('azpr-theme', nextTheme);
+    } catch {
+      // Ignore storage errors
+    }
+    applyThemeToDom(nextTheme);
+    setupSystemThemeListener(false);
+  },
+
   initTheme: () => {
     const initialTheme = getStoredTheme();
     set({ theme: initialTheme });
     applyThemeToDom(initialTheme);
     setupSystemThemeListener(initialTheme === 'system');
+  },
+
+  setSidebarCollapsed: (collapsed: boolean) => {
+    set({ sidebarCollapsed: collapsed });
+  },
+
+  toggleSidebar: () => {
+    set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed }));
   },
 
   setActiveAssetId: (id: string | null) => {
@@ -304,6 +385,37 @@ export const useUiStore = create<UiState>((set) => ({
 
   setEditingElement: (editing: { pageId: string; elementId: string } | null) => {
     set({ editingElement: editing });
+  },
+
+  setMultiImport: (val) => {
+    set((state) => ({
+      multiImport:
+        typeof val === 'function' ? val(state.multiImport) : val,
+    }));
+  },
+
+  setOverflow: (elementId: string, isOverflow: boolean) => {
+    set((state) => {
+      const next = new Set(state.overflowIds);
+      if (isOverflow) {
+        next.add(elementId);
+      } else {
+        next.delete(elementId);
+      }
+      return { overflowIds: next };
+    });
+  },
+
+  setOutputMode: (mode: null | 'print' | 'export') => {
+    set({ outputMode: mode });
+  },
+
+  setExportProgress: (progress: { done: number; total: number } | null) => {
+    set({ exportProgress: progress });
+  },
+
+  setCheckNotice: (notice: { action: 'print' | 'export'; lines: string[] } | null) => {
+    set({ checkNotice: notice });
   },
 
   setMessage: (msg: UiMessage | null) => {

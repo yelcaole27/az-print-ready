@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { Upload, X, ArrowLeftRight, Type } from 'lucide-react';
 import { useSessionStore } from '@/store/useSessionStore';
 import { useUiStore, DocFitMode } from '@/store/useUiStore';
@@ -11,6 +11,7 @@ import { getPageDimensionsMm } from '@/lib/pageGeometry';
 import { layoutDocumentImage } from '@/lib/documentLayout';
 import { importFiles } from '@/lib/importImages';
 import { addTextBox, newTextPage } from '@/lib/textActions';
+import { computeCutGuides } from '@/lib/cutGuides';
 import { Button } from '@/components/ui/Button';
 import { Tooltip } from '@/components/ui/Tooltip';
 
@@ -25,6 +26,7 @@ export function LeftToolbar() {
     clearElements,
     updateSettings,
     applyPlacements,
+    hasManualEdits,
   } = useSessionStore();
 
   const {
@@ -306,6 +308,58 @@ export function LeftToolbar() {
   const gapInUnit =
     Math.round(mmToUnit(activeJob.settings.gapMm, unit) * 100) / 100;
 
+  const [marginDraft, setMarginDraft] = useState<string | null>(null);
+  const [gapDraft, setGapDraft] = useState<string | null>(null);
+
+  const displayMargin = marginDraft ?? String(marginInUnit);
+  const displayGap = gapDraft ?? String(gapInUnit);
+
+  const commitMargin = () => {
+    if (marginDraft === null) return;
+    const val = parseFloat(marginDraft);
+    if (isNaN(val)) {
+      setMarginDraft(null);
+      return;
+    }
+    const mm = Math.min(50, Math.max(0, unitToMm(val, unit)));
+    if (Math.abs(mm - activeJob.settings.marginMm) < 0.001) {
+      setMarginDraft(null);
+      return;
+    }
+    if (hasManualEdits(activeJob.id)) {
+      const confirmed = window.confirm('Reset your manual changes?');
+      if (!confirmed) {
+        setMarginDraft(null);
+        return;
+      }
+    }
+    setMarginDraft(null);
+    updateSettings(activeJob.id, { marginMm: mm });
+  };
+
+  const commitGap = () => {
+    if (gapDraft === null) return;
+    const val = parseFloat(gapDraft);
+    if (isNaN(val)) {
+      setGapDraft(null);
+      return;
+    }
+    const mm = Math.min(20, Math.max(0, unitToMm(val, unit)));
+    if (Math.abs(mm - activeJob.settings.gapMm) < 0.001) {
+      setGapDraft(null);
+      return;
+    }
+    if (hasManualEdits(activeJob.id)) {
+      const confirmed = window.confirm('Reset your manual changes?');
+      if (!confirmed) {
+        setGapDraft(null);
+        return;
+      }
+    }
+    setGapDraft(null);
+    updateSettings(activeJob.id, { gapMm: mm });
+  };
+
   const docFitOptions: {
     id: DocFitMode;
     title: string;
@@ -329,7 +383,7 @@ export function LeftToolbar() {
   ];
 
   return (
-    <aside className="w-[280px] shrink-0 bg-paper border-r border-line p-3 flex flex-col gap-4 overflow-y-auto select-none text-ink">
+    <div className="w-full bg-paper p-3 flex flex-col gap-4 select-none text-ink">
       {/* Inline Message Banner */}
       {message && (
         <div
@@ -856,12 +910,12 @@ export function LeftToolbar() {
               type="number"
               step="any"
               min="0"
-              value={marginInUnit}
-              onChange={(e) => {
-                const val = parseFloat(e.target.value);
-                if (!isNaN(val)) {
-                  const mm = Math.min(50, Math.max(0, unitToMm(val, unit)));
-                  updateSettings(activeJob.id, { marginMm: mm });
+              value={displayMargin}
+              onChange={(e) => setMarginDraft(e.target.value)}
+              onBlur={commitMargin}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.currentTarget.blur();
                 }
               }}
               className="w-full px-2 py-1 rounded-[6px] border border-line bg-paper text-ink focus:outline-none focus:border-blue"
@@ -874,12 +928,12 @@ export function LeftToolbar() {
               type="number"
               step="any"
               min="0"
-              value={gapInUnit}
-              onChange={(e) => {
-                const val = parseFloat(e.target.value);
-                if (!isNaN(val)) {
-                  const mm = Math.min(20, Math.max(0, unitToMm(val, unit)));
-                  updateSettings(activeJob.id, { gapMm: mm });
+              value={displayGap}
+              onChange={(e) => setGapDraft(e.target.value)}
+              onBlur={commitGap}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.currentTarget.blur();
                 }
               }}
               className="w-full px-2 py-1 rounded-[6px] border border-line bg-paper text-ink focus:outline-none focus:border-blue"
@@ -890,6 +944,48 @@ export function LeftToolbar() {
         <p className="text-[11px] text-muted">
           Printable area: {pw} × {ph} {unit}
         </p>
+
+        {/* Cut guides control */}
+        <div className="flex flex-col gap-1.5 pt-1">
+          <label className="text-muted text-xs">Cut guides</label>
+          <div className="grid grid-cols-3 p-0.5 rounded-[8px] bg-surface border border-line text-xs font-medium">
+            {(['none', 'ticks', 'outline'] as const).map((style) => {
+              const label = style === 'none' ? 'None' : style === 'ticks' ? 'Ticks' : 'Outlines';
+              const currentStyle = activeJob.settings.cutStyle ?? 'none';
+              const isSelected = currentStyle === style;
+              return (
+                <button
+                  key={style}
+                  type="button"
+                  onClick={() => updateSettings(activeJob.id, { cutStyle: style })}
+                  className={`py-1 px-1 text-center rounded-[6px] transition-colors cursor-pointer ${
+                    isSelected
+                      ? 'bg-paper text-ink shadow-xs'
+                      : 'text-muted hover:text-ink'
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Warning if cutStyle is ticks and margins are small */}
+          {(() => {
+            if ((activeJob.settings.cutStyle ?? 'none') === 'ticks') {
+              const guideInfo = computeCutGuides(activePage, activeJob.settings);
+              if (guideInfo.warning) {
+                return (
+                  <div className="flex items-start gap-1.5 text-[11px] text-muted">
+                    <span className="w-1.5 h-1.5 rounded-full bg-yellow shrink-0 mt-1" />
+                    <span>{guideInfo.warning}</span>
+                  </div>
+                );
+              }
+            }
+            return null;
+          })()}
+        </div>
       </section>
 
       {/* 7) Section: Clear all layout */}
@@ -902,6 +998,6 @@ export function LeftToolbar() {
           Clear all layout
         </button>
       </section>
-    </aside>
+    </div>
   );
 }

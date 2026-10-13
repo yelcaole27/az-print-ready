@@ -53,7 +53,7 @@ export function PageStack() {
         target?.closest?.('[contenteditable="true"], input, textarea, select')
       );
 
-      if (isInput) return;
+      if (isInput || Boolean(useUiStore.getState().multiImport)) return;
 
       // Duplicate shortcut Ctrl/Cmd+D
       if ((e.ctrlKey || e.metaKey) && (e.key === 'd' || e.key === 'D')) {
@@ -257,6 +257,14 @@ export function PageStack() {
   return (
     <div
       ref={containerRef}
+      onClick={(e) => {
+        // Deselect if clicking on the background container itself or non-element area
+        const target = e.target as HTMLElement;
+        if (!target.closest('[data-element-id]') && !target.closest('.bg-sheet')) {
+          useUiStore.getState().setEditingElement(null);
+          clearSelection();
+        }
+      }}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}

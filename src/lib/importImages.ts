@@ -53,10 +53,54 @@ export async function importFiles(files: File[]): Promise<void> {
   }
 
   if (validAssets.length > 0) {
-    const { addAssets } = useSessionStore.getState();
-    const { setActiveAssetId } = useUiStore.getState();
-    addAssets(validAssets);
-    setActiveAssetId(validAssets[validAssets.length - 1].id);
+    const sessionStore = useSessionStore.getState();
+    const uiStore = useUiStore.getState();
+
+    // Check if the ACTIVE JOB is currently in start state (zero elements across all pages)
+    const activeJob =
+      sessionStore.jobs.find((j) => j.id === sessionStore.activeJobId) ||
+      sessionStore.jobs[0];
+
+    const isStartState =
+      !activeJob ||
+      activeJob.pages.every((p) => !p.elements || p.elements.length === 0);
+
+    // Add assets to session store (does NOT create undo history for assets)
+    sessionStore.addAssets(validAssets);
+    uiStore.setActiveAssetId(validAssets[validAssets.length - 1].id);
+
+    if (validAssets.length === 1) {
+      if (isStartState && activeJob) {
+        const res = sessionStore.addBlocks(activeJob.id, [
+          { kind: 'fit', assetIds: [validAssets[0].id] },
+        ]);
+        if (res.ok) {
+          uiStore.setLayoutMode('document');
+          uiStore.setDocFit('fit-page');
+          const updatedJob = useSessionStore
+            .getState()
+            .jobs.find((j) => j.id === activeJob.id);
+          const pageCount = updatedJob?.pages.length || 1;
+          uiStore.setMessage({
+            type: 'info',
+            text: `Ready. ${pageCount} page(s)`,
+          });
+        }
+      }
+    } else {
+      // 2 or more images: open Arrange modal with batch asset IDs in import order
+      const batchAssetIds = validAssets.map((a) => a.id);
+      uiStore.setMultiImport({
+        step: 'arrange',
+        batchAssetIds,
+        cards: batchAssetIds.map((id) => ({
+          id: nanoid(),
+          assetIds: [id],
+        })),
+        layoutStepIndex: 0,
+        chosenLayouts: {},
+      });
+    }
   }
 
   const { setMessage } = useUiStore.getState();

@@ -47,18 +47,34 @@ export interface PageElement {
   autoGrow?: boolean;
 }
 
+export type BlockKind = 'fit' | 'fill' | 'width' | 'collage' | 'sheet';
+
+export interface Block {
+  id: string;
+  kind: BlockKind;
+  assetIds: string[];
+  collageOption?: 'best' | 'grid' | 'column' | 'row';
+  size?: { id: string; wMm: number; hMm: number };
+  qty?: number;
+  fillPage?: boolean;
+  crop?: boolean;
+  generatedSig: string;
+}
+
 export interface Page {
   id: string;
   paperId: string;
   orientation: 'portrait' | 'landscape';
   elements: PageElement[];
+  blockId?: string;
 }
 
 export interface Settings {
   unit: Unit;
   marginMm: number;
   gapMm: number;
-  cutMarks: boolean;
+  cutStyle: 'none' | 'ticks' | 'outline';
+  borderless: boolean;
 }
 
 export interface Job {
@@ -66,6 +82,7 @@ export interface Job {
   name: string;
   settings: Settings;
   pages: Page[];
+  blocks: Block[];
 }
 
 export interface Session {

@@ -37,4 +37,16 @@ export const PAPERS: PaperSize[] = [
     widthMm: 148,
     heightMm: 210,
   },
+  {
+    id: '4r',
+    name: '4R',
+    widthMm: 101.6,
+    heightMm: 152.4,
+  },
+  {
+    id: '5r',
+    name: '5R',
+    widthMm: 127,
+    heightMm: 177.8,
+  },
 ];

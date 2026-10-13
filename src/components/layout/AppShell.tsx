@@ -5,12 +5,19 @@ import { useSessionStore } from '@/store/useSessionStore';
 import { useUiStore } from '@/store/useUiStore';
 import { importFiles } from '@/lib/importImages';
 import { TopBar } from './TopBar';
-import { JobTabs } from './JobTabs';
-import { LeftToolbar } from './LeftToolbar';
+import { Sidebar } from './Sidebar';
+import { StartScreen } from './StartScreen';
 import { RightPanel } from './RightPanel';
 import { TextToolbar } from './TextToolbar';
 import { PageStack } from '../canvas/PageStack';
 import { newTextPage } from '@/lib/textActions';
+import { PrintView } from '@/components/output/PrintView';
+import { CheckNotice } from '@/components/output/CheckNotice';
+import { ExportProgress } from '@/components/output/ExportProgress';
+import { requestPrint, confirmNotice, cancelExportPdf } from '@/lib/outputManager';
+import { ArrangeModal } from '@/components/modals/ArrangeModal';
+import { LayoutModal } from '@/components/modals/LayoutModal';
+import { ChangeLayoutModal } from '@/components/modals/ChangeLayoutModal';
 
 export function AppShell() {
   const { jobs, assets } = useSessionStore();
@@ -47,7 +54,7 @@ export function AppShell() {
         target?.closest?.('[contenteditable="true"], input, textarea, select')
       );
 
-      if (isInput) return;
+      if (isInput || Boolean(useUiStore.getState().multiImport)) return;
 
       const files: File[] = [];
       if (e.clipboardData) {
@@ -97,7 +104,7 @@ export function AppShell() {
         target?.closest?.('[contenteditable="true"], input, textarea, select')
       );
 
-      if (isInput) return;
+      if (isInput || Boolean(useUiStore.getState().multiImport)) return;
 
       if (e.ctrlKey || e.metaKey) {
         if (e.key === 'z' || e.key === 'Z') {
@@ -112,6 +119,9 @@ export function AppShell() {
           e.preventDefault();
           const { activeJobId, redo } = useSessionStore.getState();
           redo(activeJobId);
+        } else if (e.key === 'p' || e.key === 'P') {
+          e.preventDefault();
+          requestPrint();
         }
       }
     };
@@ -120,28 +130,83 @@ export function AppShell() {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  const { outputMode, checkNotice, exportProgress, setCheckNotice } = useUiStore();
+  const { activeJobId } = useSessionStore();
+  const activeJob = jobs.find((j) => j.id === activeJobId) || jobs[0];
+
+  const assetsById = React.useMemo(() => {
+    return new Map(assets.map((a) => [a.id, a]));
+  }, [assets]);
+
+  const outputPageIndexes = React.useMemo(() => {
+    if (!activeJob) return [];
+    return activeJob.pages
+      .map((p, idx) => ({ hasElements: p.elements.length > 0, idx }))
+      .filter((p) => p.hasElements)
+      .map((p) => p.idx);
+  }, [activeJob]);
+
+  const isStartState = !activeJob?.pages.some((p) => p.elements && p.elements.length > 0);
+
   return (
-    <div className="min-w-[1200px] h-screen flex flex-col bg-surface overflow-hidden">
-      {/* Top Navigation & Controls */}
-      <TopBar />
+    <>
+      <div id="app-root" className="min-w-[1100px] h-screen flex flex-col bg-surface overflow-hidden">
+        {/* Top Navigation & Controls */}
+        <TopBar />
 
-      {/* Job Tabs Row */}
-      <JobTabs />
+        {/* Main Body */}
+        <div className="flex-1 flex overflow-hidden">
+          {/* Sidebar */}
+          <Sidebar />
 
-      {/* Main Workspace Body */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Left Toolbar */}
-        <LeftToolbar />
+          {/* Conditional Center Area: StartScreen OR Workspace */}
+          {isStartState ? (
+            <StartScreen />
+          ) : (
+            <>
+              {/* Workspace: TextToolbar + PageStack */}
+              <div className="flex-1 flex flex-col overflow-hidden">
+                <TextToolbar />
+                <PageStack />
+              </div>
 
-        {/* Center Area: Text Toolbar + PageStack Canvas */}
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <TextToolbar />
-          <PageStack />
+              {/* Right Inspector Panel */}
+              <RightPanel />
+            </>
+          )}
         </div>
-
-        {/* Right Inspector Panel */}
-        <RightPanel />
       </div>
-    </div>
+
+      {/* Print Root rendered for print media & PDF canvas generation */}
+      {outputMode !== null && activeJob && (
+        <div id="print-root">
+          <PrintView
+            job={activeJob}
+            pageIndexes={outputPageIndexes}
+            assetsById={assetsById}
+          />
+        </div>
+      )}
+
+      {/* Preflight Check Notice Modal */}
+      {checkNotice && (
+        <CheckNotice
+          onConfirm={confirmNotice}
+          onCancel={() => setCheckNotice(null)}
+        />
+      )}
+
+      {/* Export Progress Modal */}
+      {exportProgress && (
+        <ExportProgress
+          onCancel={cancelExportPdf}
+        />
+      )}
+
+      {/* Multi-image import modals */}
+      <ArrangeModal />
+      <LayoutModal />
+      <ChangeLayoutModal />
+    </>
   );
 }
