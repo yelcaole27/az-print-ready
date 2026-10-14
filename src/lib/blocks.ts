@@ -121,30 +121,14 @@ export function generateBlockPages(block: Block, ctx: BlockCtx): Page[] {
   }
 
   if (block.kind === 'sheet') {
-    const assetId = block.assetIds[0];
-    const asset = assetId ? ctx.assetsById[assetId] : undefined;
-    if (!asset || !block.size) {
-      return [createEmptyPage()];
+    const pages: Page[] = [createEmptyPage()];
+
+    const rows = block.rows || [];
+    if (rows.length === 0) {
+      return pages;
     }
 
-    let itemWMm = block.size.wMm;
-    let itemHMm = block.size.hMm;
-
-    const isAssetLandscape = asset.pxW > asset.pxH;
-    const isSizeLandscape = itemWMm > itemHMm;
-    if ((isAssetLandscape && !isSizeLandscape) || (!isAssetLandscape && isSizeLandscape)) {
-      const temp = itemWMm;
-      itemWMm = itemHMm;
-      itemHMm = temp;
-    }
-
-    const dummyStartPage: Page = {
-      id: nanoid(),
-      paperId: ctx.paperId,
-      orientation: ctx.orientation,
-      elements: [],
-      blockId: block.id,
-    };
+    const orderedRows = [...rows].sort((a, b) => (a.fillPage ? 1 : 0) - (b.fillPage ? 1 : 0));
 
     const settings: Settings = {
       unit: 'in',
@@ -154,66 +138,67 @@ export function generateBlockPages(block: Block, ctx: BlockCtx): Page[] {
       borderless: ctx.marginMm === 0,
     };
 
-    const packRes = packCopies({
-      pages: [dummyStartPage],
-      startPageIndex: 0,
-      itemWMm,
-      itemHMm,
-      qty: block.fillPage ? 500 : (block.qty ?? 1),
-      allowRotate: true,
-      fillActiveOnly: Boolean(block.fillPage),
-      settings,
-      assetId: asset.id,
-      fit: block.crop ? 'cover' : 'contain',
-    });
+    const printableW = Math.max(0, ctx.pageWMm - 2 * ctx.marginMm);
+    const printableH = Math.max(0, ctx.pageHMm - 2 * ctx.marginMm);
 
-    if (packRes.error || packRes.placedCount === 0) {
-      useUiStore.getState().setMessage({
-        type: 'info',
-        text: "Some sizes don't fit this paper",
+    for (const row of orderedRows) {
+      const asset = ctx.assetsById[row.assetId];
+      if (!asset) continue;
+
+      let itemWMm = row.size.wMm;
+      let itemHMm = row.size.hMm;
+
+      const isAssetLandscape = asset.pxW > asset.pxH;
+      const isSizeLandscape = itemWMm > itemHMm;
+      if ((isAssetLandscape && !isSizeLandscape) || (!isAssetLandscape && isSizeLandscape)) {
+        const temp = itemWMm;
+        itemWMm = itemHMm;
+        itemHMm = temp;
+      }
+
+      const fitsNormal = itemWMm <= printableW && itemHMm <= printableH;
+      const fitsRotated = itemHMm <= printableW && itemWMm <= printableH;
+
+      if (!fitsNormal && !fitsRotated) {
+        useUiStore.getState().setMessage({
+          type: 'info',
+          text: "Some sizes don't fit this paper",
+        });
+        continue;
+      }
+
+      const isFill = Boolean(row.fillPage);
+      const startPageIndex = isFill ? pages.length - 1 : 0;
+      const targetQty = isFill ? 500 : (row.qty ?? 1);
+
+      const packRes = packCopies({
+        pages,
+        startPageIndex,
+        itemWMm,
+        itemHMm,
+        qty: targetQty,
+        allowRotate: true,
+        fillActiveOnly: isFill,
+        settings,
+        assetId: asset.id,
+        fit: row.crop ? 'cover' : 'contain',
       });
 
-      const pagesElements = layoutDocumentImage({
-        asset,
-        pageWMm: ctx.pageWMm,
-        pageHMm: ctx.pageHMm,
-        marginMm: ctx.marginMm,
-        fit: 'fit-page',
-        autoRotate: true,
-        align: 'center',
-      });
+      if (packRes.placements.length > 0) {
+        const maxPageIndex = Math.max(...packRes.placements.map((p) => p.pageIndex));
+        while (pages.length <= maxPageIndex) {
+          pages.push(createEmptyPage());
+        }
 
-      return [
-        {
-          id: nanoid(),
-          paperId: ctx.paperId,
-          orientation: ctx.orientation,
-          elements: pagesElements[0] || [],
-          blockId: block.id,
-        },
-      ];
-    }
-
-    const maxPageIndex = Math.max(0, ...packRes.placements.map((p) => p.pageIndex));
-    const resultPages: Page[] = [];
-
-    for (let i = 0; i <= maxPageIndex; i++) {
-      resultPages.push({
-        id: i === 0 ? dummyStartPage.id : nanoid(),
-        paperId: ctx.paperId,
-        orientation: ctx.orientation,
-        elements: [],
-        blockId: block.id,
-      });
-    }
-
-    for (const p of packRes.placements) {
-      if (resultPages[p.pageIndex]) {
-        resultPages[p.pageIndex].elements.push(p.element);
+        for (const p of packRes.placements) {
+          if (pages[p.pageIndex]) {
+            pages[p.pageIndex].elements.push(p.element);
+          }
+        }
       }
     }
 
-    return resultPages;
+    return pages;
   }
 
   return [createEmptyPage()];

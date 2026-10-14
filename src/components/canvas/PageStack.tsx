@@ -15,7 +15,8 @@ export function PageStack() {
   const dragCounter = useRef<number>(0);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
 
-  const { jobs, activeJobId, addPage, removePage, removeElement } = useSessionStore();
+  const { jobs, activeJobId, addPage, removePage, removeElement, removeElements, nudgeGroup } =
+    useSessionStore();
   const {
     zoom,
     zoomMode,
@@ -24,6 +25,7 @@ export function PageStack() {
     setZoom,
     setActivePage,
     clearSelection,
+    isHoveringAddPage,
   } = useUiStore();
 
   const activeJob = jobs.find((j) => j.id === activeJobId) || jobs[0];
@@ -55,9 +57,29 @@ export function PageStack() {
 
       if (isInput || Boolean(useUiStore.getState().multiImport)) return;
 
-      // Duplicate shortcut Ctrl/Cmd+D
+      // Select all elements on active page Ctrl/Cmd+A
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'a' || e.key === 'A')) {
+        const { isSettingsOpen, editingBlockLayoutId, activePageId, setSelection } =
+          useUiStore.getState();
+        if (isSettingsOpen || editingBlockLayoutId) return;
+
+        const job = useSessionStore.getState().jobs.find((j) => j.id === activeJobId);
+        const curPage =
+          job?.pages.find((p) => p.id === activePageId) || job?.pages[0];
+        if (curPage && curPage.elements.length > 0) {
+          e.preventDefault();
+          const allIds = curPage.elements.map((el) => el.id);
+          setSelection(curPage.id, allIds);
+        }
+        return;
+      }
+
+      // Duplicate shortcut Ctrl/Cmd+D (ignored for groups)
       if ((e.ctrlKey || e.metaKey) && (e.key === 'd' || e.key === 'D')) {
-        const { selected, select } = useUiStore.getState();
+        const { selected, selectedIds, select } = useUiStore.getState();
+        if (selectedIds.length >= 2) {
+          return;
+        }
         if (selected) {
           const job = useSessionStore.getState().jobs.find((j) => j.id === activeJobId);
           const page = job?.pages.find((p) => p.id === selected.pageId);
@@ -81,7 +103,57 @@ export function PageStack() {
         e.key === 'ArrowLeft' ||
         e.key === 'ArrowRight'
       ) {
-        const { selected } = useUiStore.getState();
+        const { selected, selectedIds, selectedPageId } = useUiStore.getState();
+        if (selectedIds.length >= 2 && selectedPageId) {
+          const job = useSessionStore.getState().jobs.find((j) => j.id === activeJobId);
+          const page = job?.pages.find((p) => p.id === selectedPageId);
+          if (page) {
+            const movable = page.elements.filter(
+              (el) => selectedIds.includes(el.id) && !el.sliceIndex
+            );
+            if (movable.length > 0) {
+              e.preventDefault();
+              const delta = e.shiftKey ? 10 : 1;
+              let dx = 0;
+              let dy = 0;
+              if (e.key === 'ArrowLeft') dx = -delta;
+              if (e.key === 'ArrowRight') dx = delta;
+              if (e.key === 'ArrowUp') dy = -delta;
+              if (e.key === 'ArrowDown') dy = delta;
+
+              const { wMm: pageW, hMm: pageH } = getPageDimensionsMm(page);
+              const minX = Math.min(...movable.map((el) => el.xMm));
+              const minY = Math.min(...movable.map((el) => el.yMm));
+              const maxX = Math.max(...movable.map((el) => el.xMm + el.wMm));
+              const maxY = Math.max(...movable.map((el) => el.yMm + el.hMm));
+
+              if (minX + dx < 0) dx = -minX;
+              if (maxX + dx > pageW) dx = pageW - maxX;
+              if (minY + dy < 0) dy = -minY;
+              if (maxY + dy > pageH) dy = pageH - maxY;
+
+              if (dx !== 0 || dy !== 0) {
+                const now = Date.now();
+                const shouldCoalesce =
+                  lastNudgeRef.current !== null &&
+                  lastNudgeRef.current.elementId === 'group' &&
+                  now - lastNudgeRef.current.time < 500;
+
+                lastNudgeRef.current = { time: now, elementId: 'group' };
+                nudgeGroup(
+                  activeJobId,
+                  selectedPageId,
+                  movable.map((el) => el.id),
+                  dx,
+                  dy,
+                  shouldCoalesce
+                );
+              }
+            }
+          }
+          return;
+        }
+
         if (selected) {
           const job = useSessionStore.getState().jobs.find((j) => j.id === activeJobId);
           const page = job?.pages.find((p) => p.id === selected.pageId);
@@ -121,8 +193,12 @@ export function PageStack() {
       }
 
       if (e.key === 'Delete' || e.key === 'Backspace') {
-        const { selected } = useUiStore.getState();
-        if (selected) {
+        const { selected, selectedIds, selectedPageId } = useUiStore.getState();
+        if (selectedIds.length >= 2 && selectedPageId) {
+          e.preventDefault();
+          removeElements(activeJobId, selectedPageId, selectedIds);
+          clearSelection();
+        } else if (selected) {
           e.preventDefault();
           removeElement(activeJobId, selected.pageId, selected.elementId);
           clearSelection();
@@ -134,7 +210,7 @@ export function PageStack() {
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [activeJobId, removeElement, clearSelection]);
+  }, [activeJobId, removeElement, removeElements, nudgeGroup, clearSelection]);
 
   // Compute Fit Width and Fit Page zoom levels
   const computeFitWidth = useCallback(() => {
@@ -269,6 +345,7 @@ export function PageStack() {
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
+      data-canvas-scroll="true"
       className="relative flex-1 bg-surface overflow-auto p-8 select-none"
     >
       {/* Drag & Drop Overlay */}
@@ -302,11 +379,14 @@ export function PageStack() {
         <div className="pt-2">
           <Button
             variant="outline"
+            data-drop-newpage="true"
             onClick={() => addPage(activeJob.id)}
-            className="flex items-center gap-1.5"
+            className={`flex items-center gap-1.5 transition-all ${
+              isHoveringAddPage ? 'border-dashed border-2 border-blue' : ''
+            }`}
           >
             <Plus className="w-3.5 h-3.5" />
-            <span>Add page</span>
+            <span>{isHoveringAddPage ? 'Drop here for a new page' : 'Add page'}</span>
           </Button>
         </div>
       </div>

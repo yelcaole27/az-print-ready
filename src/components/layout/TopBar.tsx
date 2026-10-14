@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef } from 'react';
-import { Undo2, Redo2, Moon, Sun } from 'lucide-react';
+import { Undo2, Redo2, Moon, Sun, Settings } from 'lucide-react';
 import { useSessionStore } from '@/store/useSessionStore';
 import { useUiStore } from '@/store/useUiStore';
 import { Tooltip } from '@/components/ui/Tooltip';
@@ -9,7 +9,7 @@ import { requestPrint, requestExportPdf } from '@/lib/outputManager';
 
 export function TopBar() {
   const { jobs, activeJobId, renameJob, undo, redo, canUndo, canRedo } = useSessionStore();
-  const { toggleTheme } = useUiStore();
+  const { toggleTheme, setSettingsOpen } = useUiStore();
 
   const activeJob = jobs.find((j) => j.id === activeJobId) || jobs[0];
   const hasUndo = canUndo(activeJobId);
@@ -127,6 +127,18 @@ export function TopBar() {
             </button>
           </>
         )}
+
+        {/* Settings Button (visible in both start and workspace states) */}
+        <Tooltip content="Settings">
+          <button
+            type="button"
+            onClick={() => setSettingsOpen(true)}
+            aria-label="Settings"
+            className="w-10 h-10 flex items-center justify-center rounded-[8px] text-white hover:bg-white/10 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue"
+          >
+            <Settings className="w-5 h-5" />
+          </button>
+        </Tooltip>
 
         {/* Theme Toggle (both icons rendered with CSS switching driven by data-theme) */}
         <Tooltip content="Switch light or dark mode">

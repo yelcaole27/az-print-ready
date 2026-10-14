@@ -86,6 +86,25 @@ export async function importFiles(files: File[]): Promise<void> {
             text: `Ready. ${pageCount} page(s)`,
           });
         }
+      } else if (!isStartState && activeJob) {
+        const res = sessionStore.addBlocks(activeJob.id, [
+          { kind: 'fit', assetIds: [validAssets[0].id] },
+        ]);
+        if (res.ok) {
+          uiStore.setActiveAssetId(validAssets[0].id);
+          if (res.firstPageId) {
+            uiStore.setActivePage(res.firstPageId);
+          }
+          uiStore.setMessage({
+            type: 'info',
+            text: 'Added',
+          });
+        } else if (res.reason) {
+          uiStore.setMessage({
+            type: 'warn',
+            text: res.reason,
+          });
+        }
       }
     } else {
       // 2 or more images: open Arrange modal with batch asset IDs in import order

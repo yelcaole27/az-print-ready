@@ -14,6 +14,12 @@ export const SIZE_PRESETS: SizePreset[] = [
     heightMm: 25.4,
   },
   {
+    id: '1.5x1.5',
+    name: '1.5x1.5',
+    widthMm: 38.1,
+    heightMm: 38.1,
+  },
+  {
     id: '2x2',
     name: '2x2',
     widthMm: 50.8,

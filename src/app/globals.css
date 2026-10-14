@@ -146,8 +146,11 @@ body {
 }
 
 @media screen {
-  #print-root {
+  #print-root:not(.exporting-pdf) {
     display: none;
+  }
+  #print-root.exporting-pdf {
+    display: block !important;
   }
 }
 

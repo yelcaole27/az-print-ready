@@ -2,7 +2,6 @@ import { create } from 'zustand';
 
 export type ZoomMode = 'fit-page' | 'fit-width' | 'custom';
 export type AppTheme = 'light' | 'dark' | 'system';
-export type SizeMode = 'preset' | 'custom';
 export type FitMode = 'cover' | 'contain';
 export type LayoutMode = 'sheet' | 'document';
 export type DocFitMode = 'fit-page' | 'fill-page' | 'fill-width';
@@ -37,29 +36,20 @@ interface UiState {
   // Asset and Selection
   activeAssetId: string | null;
   selected: { pageId: string; elementId: string } | null;
+  selectedIds: string[];
+  selectedPageId: string | null;
+  groupDraft: { pageId: string; dxMm: number; dyMm: number } | null;
 
   // Layout Mode
   layoutMode: LayoutMode;
 
-  // Sheet Placement Form State
-  sizeMode: SizeMode;
-  presetId: string;
-  customWMm: number;
-  customHMm: number;
-  qty: number;
-  fit: FitMode;
-  matchOrientation: boolean;
-  allowRotate: boolean;
-
   // Document Placement Form State
   docFit: DocFitMode;
-  docAutoRotate: boolean;
-  docEdgeToEdge: boolean;
-  docAlign: DocAlign;
-  docCopies: number;
 
   // Transient Guides and Controls
   guides: { axis: 'x' | 'y'; posMm: number }[];
+  dropTargetPageId: string | null;
+  isHoveringAddPage: boolean;
   aspectLock: boolean;
 
   // TipTap Editor Integration
@@ -73,6 +63,7 @@ interface UiState {
   outputMode: null | 'print' | 'export';
   exportProgress: { done: number; total: number } | null;
   checkNotice: { action: 'print' | 'export'; lines: string[] } | null;
+  assetSrcOverrides: Record<string, string> | null;
 
   // Multi-image import flow
   multiImport: MultiImportState | null;
@@ -80,10 +71,14 @@ interface UiState {
   // Collage Block Layout Modal
   editingBlockLayoutId: string | null;
 
+  // Settings Modal
+  isSettingsOpen: boolean;
+
   // Inline Message Banner
   message: UiMessage | null;
 
   setEditingBlockLayoutId: (id: string | null) => void;
+  setSettingsOpen: (open: boolean) => void;
 
   setMultiImport: (
     val:
@@ -95,6 +90,7 @@ interface UiState {
   setOutputMode: (mode: null | 'print' | 'export') => void;
   setExportProgress: (progress: { done: number; total: number } | null) => void;
   setCheckNotice: (notice: { action: 'print' | 'export'; lines: string[] } | null) => void;
+  setAssetSrcOverrides: (overrides: Record<string, string> | null) => void;
 
   setZoom: (zoom: number) => void;
   setZoomMode: (mode: ZoomMode) => void;
@@ -108,30 +104,20 @@ interface UiState {
 
   setActiveAssetId: (id: string | null) => void;
   select: (sel: { pageId: string; elementId: string } | null) => void;
+  setSelection: (pageId: string, ids: string[]) => void;
   clearSelection: () => void;
+  setGroupDraft: (draft: { pageId: string; dxMm: number; dyMm: number } | null) => void;
 
   setGuides: (guides: { axis: 'x' | 'y'; posMm: number }[]) => void;
   clearGuides: () => void;
+  setDropTargetPageId: (id: string | null) => void;
+  setIsHoveringAddPage: (hovering: boolean) => void;
   setAspectLock: (lock: boolean) => void;
   toggleAspectLock: () => void;
 
   setLayoutMode: (mode: LayoutMode) => void;
 
-  setSizeMode: (mode: SizeMode) => void;
-  setPresetId: (id: string) => void;
-  setCustomWMm: (w: number) => void;
-  setCustomHMm: (h: number) => void;
-  swapCustomDimensions: () => void;
-  setQty: (qty: number) => void;
-  setFit: (fit: FitMode) => void;
-  setMatchOrientation: (val: boolean) => void;
-  setAllowRotate: (val: boolean) => void;
-
   setDocFit: (fit: DocFitMode) => void;
-  setDocAutoRotate: (val: boolean) => void;
-  setDocEdgeToEdge: (val: boolean) => void;
-  setDocAlign: (align: DocAlign) => void;
-  setDocCopies: (copies: number) => void;
 
   setActiveEditor: (editor: unknown | null) => void;
   setEditingElement: (editing: { pageId: string; elementId: string } | null) => void;
@@ -189,25 +175,17 @@ export const useUiStore = create<UiState>((set) => ({
 
   activeAssetId: null,
   selected: null,
+  selectedIds: [],
+  selectedPageId: null,
+  groupDraft: null,
 
   layoutMode: 'sheet',
 
-  sizeMode: 'preset',
-  presetId: 'wallet',
-  customWMm: 50.8,
-  customHMm: 76.2,
-  qty: 1,
-  fit: 'cover',
-  matchOrientation: true,
-  allowRotate: true,
-
   docFit: 'fit-page',
-  docAutoRotate: true,
-  docEdgeToEdge: false,
-  docAlign: 'center',
-  docCopies: 1,
 
   guides: [],
+  dropTargetPageId: null,
+  isHoveringAddPage: false,
   aspectLock: true,
 
   activeEditor: null,
@@ -217,13 +195,19 @@ export const useUiStore = create<UiState>((set) => ({
   outputMode: null,
   exportProgress: null,
   checkNotice: null,
+  assetSrcOverrides: null,
   multiImport: null,
   editingBlockLayoutId: null,
+  isSettingsOpen: false,
 
   message: null,
 
   setEditingBlockLayoutId: (id: string | null) => {
     set({ editingBlockLayoutId: id });
+  },
+
+  setSettingsOpen: (open: boolean) => {
+    set({ isSettingsOpen: open });
   },
 
   setZoom: (zoom: number) => {
@@ -291,11 +275,50 @@ export const useUiStore = create<UiState>((set) => ({
   },
 
   select: (sel: { pageId: string; elementId: string } | null) => {
-    set({ selected: sel });
+    set({
+      selected: sel,
+      selectedIds: [],
+      selectedPageId: null,
+      groupDraft: null,
+    });
+  },
+
+  setSelection: (pageId: string, ids: string[]) => {
+    if (ids.length === 0) {
+      set({
+        selected: null,
+        selectedIds: [],
+        selectedPageId: null,
+        groupDraft: null,
+      });
+    } else if (ids.length === 1) {
+      set({
+        selected: { pageId, elementId: ids[0] },
+        selectedIds: [],
+        selectedPageId: null,
+        groupDraft: null,
+      });
+    } else {
+      set({
+        selected: null,
+        selectedIds: ids,
+        selectedPageId: pageId,
+        groupDraft: null,
+      });
+    }
   },
 
   clearSelection: () => {
-    set({ selected: null });
+    set({
+      selected: null,
+      selectedIds: [],
+      selectedPageId: null,
+      groupDraft: null,
+    });
+  },
+
+  setGroupDraft: (draft: { pageId: string; dxMm: number; dyMm: number } | null) => {
+    set({ groupDraft: draft });
   },
 
   setGuides: (guides: { axis: 'x' | 'y'; posMm: number }[]) => {
@@ -303,7 +326,15 @@ export const useUiStore = create<UiState>((set) => ({
   },
 
   clearGuides: () => {
-    set({ guides: [] });
+    set({ guides: [], dropTargetPageId: null, isHoveringAddPage: false });
+  },
+
+  setDropTargetPageId: (id: string | null) => {
+    set({ dropTargetPageId: id });
+  },
+
+  setIsHoveringAddPage: (hovering: boolean) => {
+    set({ isHoveringAddPage: hovering });
   },
 
   setAspectLock: (lock: boolean) => {
@@ -318,65 +349,8 @@ export const useUiStore = create<UiState>((set) => ({
     set({ layoutMode: mode });
   },
 
-  setSizeMode: (mode: SizeMode) => {
-    set({ sizeMode: mode });
-  },
-
-  setPresetId: (id: string) => {
-    set({ presetId: id });
-  },
-
-  setCustomWMm: (w: number) => {
-    set({ customWMm: Math.max(1, w) });
-  },
-
-  setCustomHMm: (h: number) => {
-    set({ customHMm: Math.max(1, h) });
-  },
-
-  swapCustomDimensions: () => {
-    set((state) => ({
-      customWMm: state.customHMm,
-      customHMm: state.customWMm,
-    }));
-  },
-
-  setQty: (qty: number) => {
-    const clamped = Math.min(500, Math.max(1, Math.round(qty) || 1));
-    set({ qty: clamped });
-  },
-
-  setFit: (fit: FitMode) => {
-    set({ fit });
-  },
-
-  setMatchOrientation: (val: boolean) => {
-    set({ matchOrientation: val });
-  },
-
-  setAllowRotate: (val: boolean) => {
-    set({ allowRotate: val });
-  },
-
   setDocFit: (fit: DocFitMode) => {
     set({ docFit: fit });
-  },
-
-  setDocAutoRotate: (val: boolean) => {
-    set({ docAutoRotate: val });
-  },
-
-  setDocEdgeToEdge: (val: boolean) => {
-    set({ docEdgeToEdge: val });
-  },
-
-  setDocAlign: (align: DocAlign) => {
-    set({ docAlign: align });
-  },
-
-  setDocCopies: (copies: number) => {
-    const clamped = Math.min(50, Math.max(1, Math.round(copies) || 1));
-    set({ docCopies: clamped });
   },
 
   setActiveEditor: (editor: unknown | null) => {
@@ -416,6 +390,10 @@ export const useUiStore = create<UiState>((set) => ({
 
   setCheckNotice: (notice: { action: 'print' | 'export'; lines: string[] } | null) => {
     set({ checkNotice: notice });
+  },
+
+  setAssetSrcOverrides: (overrides: Record<string, string> | null) => {
+    set({ assetSrcOverrides: overrides });
   },
 
   setMessage: (msg: UiMessage | null) => {

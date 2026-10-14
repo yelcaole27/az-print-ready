@@ -15,21 +15,30 @@ export function computeCutGuides(
   page: Page,
   settings: Settings
 ): CutGuidesResult {
-  const { cutStyle, marginMm } = settings;
+  const { cutStyle, marginMm, borderless } = settings;
   if (!cutStyle || cutStyle === 'none') {
     return { lines: [], boxes: [] };
   }
 
-  // Filter valid image elements (excluding document slices)
-  const imageElements = page.elements.filter(
-    (el) => el.type === 'image' && el.sliceIndex === undefined
-  );
+  const { wMm: pageW, hMm: pageH } = getPageDimensionsMm(page);
+  const effectiveMargin = borderless ? 0 : marginMm;
+  const printableW = Math.max(0, pageW - 2 * effectiveMargin);
+  const printableH = Math.max(0, pageH - 2 * effectiveMargin);
+  const printableArea = printableW * printableH;
+
+  // Filter valid image elements (excluding document slices and full-page images >= 85% of printable area)
+  const imageElements = page.elements.filter((el) => {
+    if (el.type !== 'image' || el.sliceIndex !== undefined) return false;
+    const elementArea = el.wMm * el.hMm;
+    if (printableArea > 0 && elementArea >= 0.85 * printableArea) {
+      return false;
+    }
+    return true;
+  });
 
   if (imageElements.length === 0) {
     return { lines: [], boxes: [] };
   }
-
-  const { wMm: pageW, hMm: pageH } = getPageDimensionsMm(page);
 
   if (cutStyle === 'outline') {
     // 'outline': one box per element placed 0.1 mm OUTSIDE its footprint

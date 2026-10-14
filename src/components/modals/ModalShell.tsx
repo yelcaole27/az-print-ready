@@ -6,12 +6,14 @@ export interface ModalShellProps {
   titleId?: string;
   onCancel: () => void;
   children: React.ReactNode;
+  className?: string;
 }
 
 export function ModalShell({
   titleId = 'modal-title',
   onCancel,
   children,
+  className,
 }: ModalShellProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const prevFocusRef = useRef<HTMLElement | null>(null);
@@ -82,6 +84,11 @@ export function ModalShell({
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
       role="presentation"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          onCancel();
+        }
+      }}
     >
       <div
         ref={dialogRef}
@@ -89,7 +96,10 @@ export function ModalShell({
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="w-[min(960px,92vw)] max-h-[86vh] flex flex-col bg-paper rounded-[16px] p-6 shadow-2xl border border-line text-ink relative overflow-hidden focus:outline-none"
+        className={
+          className ||
+          'w-[min(960px,92vw)] max-h-[86vh] flex flex-col bg-paper rounded-[16px] p-6 shadow-2xl border border-line text-ink relative overflow-hidden focus:outline-none'
+        }
       >
         {children}
       </div>

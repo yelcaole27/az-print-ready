@@ -8,9 +8,10 @@ export interface PrintViewProps {
   job: Job;
   pageIndexes: number[]; // output pages (0-based)
   assetsById: Map<string, ImageAsset>;
+  assetSrcOverrides?: Record<string, string>;
 }
 
-export function PrintView({ job, pageIndexes, assetsById }: PrintViewProps) {
+export function PrintView({ job, pageIndexes, assetsById, assetSrcOverrides }: PrintViewProps) {
   const { settings, pages } = job;
 
   return (
@@ -47,6 +48,8 @@ export function PrintView({ job, pageIndexes, assetsById }: PrintViewProps) {
               const elHPx = el.hMm * MM_TO_PX;
 
               const asset = el.assetId ? assetsById.get(el.assetId) : null;
+              const srcOverride =
+                el.assetId && assetSrcOverrides ? assetSrcOverrides[el.assetId] : undefined;
 
               return (
                 <div
@@ -60,7 +63,14 @@ export function PrintView({ job, pageIndexes, assetsById }: PrintViewProps) {
                     overflow: 'hidden',
                   }}
                 >
-                  <ElementContent element={el} asset={asset} zoom={1} />
+                  <ElementContent
+                    element={el}
+                    asset={asset}
+                    zoom={1}
+                    srcOverride={srcOverride}
+                    loading="eager"
+                    decoding="sync"
+                  />
                 </div>
               );
             })}

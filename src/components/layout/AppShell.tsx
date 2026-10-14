@@ -18,6 +18,7 @@ import { requestPrint, confirmNotice, cancelExportPdf } from '@/lib/outputManage
 import { ArrangeModal } from '@/components/modals/ArrangeModal';
 import { LayoutModal } from '@/components/modals/LayoutModal';
 import { ChangeLayoutModal } from '@/components/modals/ChangeLayoutModal';
+import { SettingsModal } from '@/components/modals/SettingsModal';
 
 export function AppShell() {
   const { jobs, assets } = useSessionStore();
@@ -130,7 +131,7 @@ export function AppShell() {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  const { outputMode, checkNotice, exportProgress, setCheckNotice } = useUiStore();
+  const { outputMode, checkNotice, exportProgress, setCheckNotice, assetSrcOverrides } = useUiStore();
   const { activeJobId } = useSessionStore();
   const activeJob = jobs.find((j) => j.id === activeJobId) || jobs[0];
 
@@ -179,11 +180,26 @@ export function AppShell() {
 
       {/* Print Root rendered for print media & PDF canvas generation */}
       {outputMode !== null && activeJob && (
-        <div id="print-root">
+        <div
+          id="print-root"
+          className={outputMode === 'export' ? 'exporting-pdf' : undefined}
+          style={
+            outputMode === 'export'
+              ? {
+                  position: 'fixed',
+                  left: 0,
+                  top: 0,
+                  zIndex: -1,
+                  pointerEvents: 'none',
+                }
+              : undefined
+          }
+        >
           <PrintView
             job={activeJob}
             pageIndexes={outputPageIndexes}
             assetsById={assetsById}
+            assetSrcOverrides={assetSrcOverrides || undefined}
           />
         </div>
       )}
@@ -207,6 +223,7 @@ export function AppShell() {
       <ArrangeModal />
       <LayoutModal />
       <ChangeLayoutModal />
+      <SettingsModal />
     </>
   );
 }

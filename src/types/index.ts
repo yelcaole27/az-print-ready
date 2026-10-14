@@ -49,15 +49,20 @@ export interface PageElement {
 
 export type BlockKind = 'fit' | 'fill' | 'width' | 'collage' | 'sheet';
 
+export interface SheetRow {
+  assetId: string;
+  size: { id: string; wMm: number; hMm: number };
+  qty: number;
+  fillPage?: boolean;
+  crop?: boolean;
+}
+
 export interface Block {
   id: string;
   kind: BlockKind;
   assetIds: string[];
   collageOption?: 'best' | 'grid' | 'column' | 'row';
-  size?: { id: string; wMm: number; hMm: number };
-  qty?: number;
-  fillPage?: boolean;
-  crop?: boolean;
+  rows?: SheetRow[];
   generatedSig: string;
 }
 

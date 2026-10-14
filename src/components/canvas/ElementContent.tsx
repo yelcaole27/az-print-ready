@@ -6,12 +6,18 @@ export interface ElementContentProps {
   element: PageElement;
   asset?: ImageAsset | null;
   zoom?: number;
+  srcOverride?: string;
+  loading?: 'eager' | 'lazy';
+  decoding?: 'sync' | 'async' | 'auto';
 }
 
 export function ElementContent({
   element,
   asset,
   zoom = 1,
+  srcOverride,
+  loading,
+  decoding,
 }: ElementContentProps) {
   if (element.type === 'text') {
     const vAlign = element.vAlign || 'top';
@@ -73,13 +79,17 @@ export function ElementContent({
     );
   }
 
+  const imgSrc = srcOverride || asset.objectUrl;
+
   if (element.crop) {
     return (
       <div className="relative w-full h-full overflow-hidden pointer-events-none">
         <img
-          src={asset.objectUrl}
+          src={imgSrc}
           alt=""
           draggable={false}
+          loading={loading}
+          decoding={decoding}
           style={{
             position: 'absolute',
             width: `${(1 / element.crop.w) * 100}%`,
@@ -121,9 +131,11 @@ export function ElementContent({
         className="absolute pointer-events-none"
       >
         <img
-          src={asset.objectUrl}
+          src={imgSrc}
           alt=""
           draggable={false}
+          loading={loading}
+          decoding={decoding}
           style={{
             width: '100%',
             height: '100%',
@@ -139,9 +151,11 @@ export function ElementContent({
 
   return (
     <img
-      src={asset.objectUrl}
+      src={imgSrc}
       alt=""
       draggable={false}
+      loading={loading}
+      decoding={decoding}
       style={{
         width: '100%',
         height: '100%',

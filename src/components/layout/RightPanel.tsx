@@ -64,7 +64,8 @@ interface ElementInspectorFormProps {
     jobId: string,
     fromPageId: string,
     toPageId: string,
-    elementId: string
+    elementId: string,
+    pos?: { xMm: number; yMm: number }
   ) => void;
   bringForward: (jobId: string, pageId: string, elementId: string) => void;
   sendBackward: (jobId: string, pageId: string, elementId: string) => void;
@@ -285,10 +286,10 @@ function ElementInspectorForm({
         </button>
       </div>
 
-      {/* Collapsed Details: More */}
+      {/* Collapsed Details: Exact position */}
       <details className="group border-t border-line pt-3 mt-1">
         <summary className="text-[12px] font-semibold text-muted uppercase tracking-wider cursor-pointer select-none py-1 flex items-center justify-between">
-          <span>More</span>
+          <span>Exact position</span>
           <ChevronDown className="w-3.5 h-3.5 group-open:rotate-180 transition-transform" />
         </summary>
 
@@ -624,10 +625,13 @@ export function RightPanel() {
     bringToFront,
     sendToBack,
     removeElement,
+    removeElements,
   } = useSessionStore();
 
   const {
     selected,
+    selectedIds,
+    selectedPageId: uiSelectedPageId,
     select,
     clearSelection,
     aspectLock,
@@ -636,6 +640,30 @@ export function RightPanel() {
 
   const activeJob = jobs.find((j) => j.id === activeJobId) || jobs[0];
   const unit = activeJob.settings.unit;
+
+  if (selectedIds.length >= 2 && uiSelectedPageId) {
+    const handleDeleteMulti = () => {
+      removeElements(activeJob.id, uiSelectedPageId, selectedIds);
+      clearSelection();
+    };
+
+    return (
+      <aside className="w-[280px] shrink-0 bg-paper border-l border-line p-4 flex flex-col gap-4 select-none text-ink">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-ink">
+            {selectedIds.length} selected
+          </h2>
+          <button
+            type="button"
+            onClick={handleDeleteMulti}
+            className="text-xs text-red hover:underline cursor-pointer font-medium"
+          >
+            Delete
+          </button>
+        </div>
+      </aside>
+    );
+  }
 
   const selectedPageId = selected?.pageId;
   const selectedElementId = selected?.elementId;
