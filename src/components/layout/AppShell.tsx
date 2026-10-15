@@ -1,9 +1,10 @@
 'use client';
 
 import React, { useEffect } from 'react';
-import { useSessionStore } from '@/store/useSessionStore';
+import { useSessionStore, getJobAssetIds } from '@/store/useSessionStore';
 import { useUiStore } from '@/store/useUiStore';
 import { importFiles } from '@/lib/importImages';
+import { nanoid } from 'nanoid';
 import { TopBar } from './TopBar';
 import { Sidebar } from './Sidebar';
 import { StartScreen } from './StartScreen';
@@ -155,6 +156,40 @@ export function AppShell() {
           const handled = cutSelection();
           if (handled) {
             e.preventDefault();
+          }
+        } else if (key === 'a' && e.shiftKey) {
+          e.preventDefault();
+          const { activeJobId, jobs } = useSessionStore.getState();
+          const activeJob = jobs.find((j) => j.id === activeJobId) || jobs[0];
+          if (!activeJob) return;
+          const jobPics = getJobAssetIds(activeJob);
+          const isStart = !activeJob.pages.some((p) => p.elements && p.elements.length > 0);
+          if (isStart) {
+            if (jobPics.length >= 2) {
+              useUiStore.getState().setMultiImport({
+                step: 'arrange',
+                batchAssetIds: jobPics,
+                cards: jobPics.map((id) => ({ id: nanoid(), assetIds: [id] })),
+                layoutStepIndex: 0,
+                chosenLayouts: {},
+                isReAdd: true,
+              });
+            } else if (jobPics.length === 1) {
+              const res = useSessionStore.getState().addBlocks(activeJob.id, [
+                { kind: 'fit', assetIds: [jobPics[0]] },
+              ]);
+              if (res.ok) {
+                useUiStore.getState().setLayoutMode('document');
+                useUiStore.getState().setDocFit('fit-page');
+                useUiStore.getState().setActiveAssetId(jobPics[0]);
+                if (res.firstPageId) {
+                  useUiStore.getState().setActivePage(res.firstPageId);
+                }
+              }
+            }
+          } else if (jobPics.length >= 2) {
+            const { toggleSelectAll } = useUiStore.getState();
+            toggleSelectAll();
           }
         } else if (key === 'd') {
           const handled = duplicateSelection();

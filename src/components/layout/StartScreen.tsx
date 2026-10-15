@@ -2,6 +2,8 @@
 
 import React, { useRef, useState } from 'react';
 import { importFiles } from '@/lib/importImages';
+import { useSessionStore } from '@/store/useSessionStore';
+import { useUiStore } from '@/store/useUiStore';
 
 export function StartScreen() {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -26,14 +28,21 @@ export function StartScreen() {
   };
 
   const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragOver(true);
+    if (
+      e.dataTransfer.types.includes('Files') ||
+      e.dataTransfer.types.includes('application/x-azpr-asset')
+    ) {
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = 'copy';
+      setIsDragOver(true);
+    }
   };
 
   const handleDragLeave = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    if (e.currentTarget.contains(e.relatedTarget as Node)) return;
     setIsDragOver(false);
   };
 
@@ -41,6 +50,35 @@ export function StartScreen() {
     e.preventDefault();
     e.stopPropagation();
     setIsDragOver(false);
+
+    const assetId = e.dataTransfer.getData('application/x-azpr-asset');
+    if (assetId) {
+      const { jobs, activeJobId, addBlocks } = useSessionStore.getState();
+      const activeJob = jobs.find((j) => j.id === activeJobId) || jobs[0];
+      if (activeJob) {
+        const res = addBlocks(activeJob.id, [
+          { kind: 'fit', assetIds: [assetId] },
+        ]);
+        if (res.ok) {
+          const { setActiveAssetId, setActivePage, select } = useUiStore.getState();
+          setActiveAssetId(assetId);
+          if (res.firstPageId) {
+            setActivePage(res.firstPageId);
+            const updatedJob = useSessionStore
+              .getState()
+              .jobs.find((j) => j.id === activeJob.id);
+            const page = updatedJob?.pages.find((p) => p.id === res.firstPageId);
+            const el =
+              page?.elements.find((item) => item.assetId === assetId) ||
+              page?.elements[0];
+            if (page && el) {
+              select({ pageId: page.id, elementId: el.id });
+            }
+          }
+        }
+      }
+      return;
+    }
 
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       importFiles(Array.from(e.dataTransfer.files));

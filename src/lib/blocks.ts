@@ -1,8 +1,9 @@
 import { nanoid } from 'nanoid';
-import { Block, ImageAsset, Page, Settings } from '@/types';
+import { Block, ImageAsset, Page, PageElement, Settings } from '@/types';
 import { layoutDocumentImage } from '@/lib/documentLayout';
 import { collageOptions, placedToElements, CollageItem } from '@/lib/collageLayout';
-import { packCopies } from '@/lib/packing';
+import { packCopies, findSpot, printableRect, Rect } from '@/lib/packing';
+import { getPageDimensionsMm } from '@/lib/pageGeometry';
 import { useUiStore } from '@/store/useUiStore';
 
 export interface BlockCtx {
@@ -128,7 +129,17 @@ export function generateBlockPages(block: Block, ctx: BlockCtx): Page[] {
       return pages;
     }
 
-    const orderedRows = [...rows].sort((a, b) => (a.fillPage ? 1 : 0) - (b.fillPage ? 1 : 0));
+    const orderedRows = [...rows].sort((a, b) => {
+      if (Boolean(a.fillPage) !== Boolean(b.fillPage)) {
+        return a.fillPage ? 1 : -1;
+      }
+      const areaA = a.size.wMm * a.size.hMm;
+      const areaB = b.size.wMm * b.size.hMm;
+      if (Math.abs(areaB - areaA) > 0.01) {
+        return areaB - areaA;
+      }
+      return 0;
+    });
 
     const settings: Settings = {
       unit: 'in',
@@ -141,7 +152,10 @@ export function generateBlockPages(block: Block, ctx: BlockCtx): Page[] {
     const printableW = Math.max(0, ctx.pageWMm - 2 * ctx.marginMm);
     const printableH = Math.max(0, ctx.pageHMm - 2 * ctx.marginMm);
 
-    for (const row of orderedRows) {
+    const nonFillRows = orderedRows.filter((r) => !r.fillPage);
+    const fillRows = orderedRows.filter((r) => Boolean(r.fillPage));
+
+    for (const row of nonFillRows) {
       const asset = ctx.assetsById[row.assetId];
       if (!asset) continue;
 
@@ -167,18 +181,16 @@ export function generateBlockPages(block: Block, ctx: BlockCtx): Page[] {
         continue;
       }
 
-      const isFill = Boolean(row.fillPage);
-      const startPageIndex = isFill ? pages.length - 1 : 0;
-      const targetQty = isFill ? 500 : (row.qty ?? 1);
+      const targetQty = row.qty ?? 1;
 
       const packRes = packCopies({
         pages,
-        startPageIndex,
+        startPageIndex: 0,
         itemWMm,
         itemHMm,
         qty: targetQty,
         allowRotate: true,
-        fillActiveOnly: isFill,
+        fillActiveOnly: false,
         settings,
         assetId: asset.id,
         fit: row.crop ? 'cover' : 'contain',
@@ -193,6 +205,65 @@ export function generateBlockPages(block: Block, ctx: BlockCtx): Page[] {
         for (const p of packRes.placements) {
           if (pages[p.pageIndex]) {
             pages[p.pageIndex].elements.push(p.element);
+          }
+        }
+      }
+    }
+
+    if (fillRows.length > 0) {
+      const activePageIndex = pages.length - 1;
+      const page = pages[activePageIndex];
+      const { wMm: pW, hMm: pH } = getPageDimensionsMm(page);
+      const pPrintable = printableRect(pW, pH, settings.marginMm);
+      const occupied: Rect[] = page.elements.map((el) => ({
+        x: el.xMm,
+        y: el.yMm,
+        w: el.wMm,
+        h: el.hMm,
+      }));
+
+      let placedAny = true;
+      let totalFilled = 0;
+      while (placedAny && totalFilled < 500) {
+        placedAny = false;
+        for (const row of fillRows) {
+          const asset = ctx.assetsById[row.assetId];
+          if (!asset) continue;
+
+          let itemWMm = row.size.wMm;
+          let itemHMm = row.size.hMm;
+          const isAssetLandscape = asset.pxW > asset.pxH;
+          const isSizeLandscape = itemWMm > itemHMm;
+          if ((isAssetLandscape && !isSizeLandscape) || (!isAssetLandscape && isSizeLandscape)) {
+            const temp = itemWMm;
+            itemWMm = itemHMm;
+            itemHMm = temp;
+          }
+
+          let spot = findSpot(occupied, itemWMm, itemHMm, pPrintable, settings.gapMm);
+          let rotation: 0 | 90 = 0;
+          if (!spot && itemWMm !== itemHMm) {
+            spot = findSpot(occupied, itemHMm, itemWMm, pPrintable, settings.gapMm);
+            if (spot) rotation = 90;
+          }
+
+          if (spot) {
+            const element: PageElement = {
+              id: nanoid(),
+              type: 'image',
+              xMm: spot.x,
+              yMm: spot.y,
+              wMm: spot.w,
+              hMm: spot.h,
+              rotation,
+              assetId: asset.id,
+              fit: row.crop ? 'cover' : 'contain',
+              cropGuides: false,
+            };
+            page.elements.push(element);
+            occupied.push(spot);
+            totalFilled++;
+            placedAny = true;
           }
         }
       }

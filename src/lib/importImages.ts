@@ -66,7 +66,7 @@ export async function importFiles(files: File[]): Promise<void> {
       activeJob.pages.every((p) => !p.elements || p.elements.length === 0);
 
     // Add assets to session store (does NOT create undo history for assets)
-    sessionStore.addAssets(validAssets);
+    sessionStore.addAssets(validAssets, activeJob?.id);
     uiStore.setActiveAssetId(validAssets[validAssets.length - 1].id);
 
     if (validAssets.length === 1) {

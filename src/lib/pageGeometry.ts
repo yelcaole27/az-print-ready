@@ -15,6 +15,10 @@ export function mmToScreenPx(mm: number, zoom: number): number {
   return mm * MM_TO_PX * zoom;
 }
 
+export function screenPxToMm(px: number, zoom: number): number {
+  return px / (MM_TO_PX * zoom);
+}
+
 export function clampToPage(
   x: number,
   y: number,

@@ -88,6 +88,7 @@ export interface Job {
   settings: Settings;
   pages: Page[];
   blocks: Block[];
+  assetIds?: string[];
 }
 
 export interface Session {

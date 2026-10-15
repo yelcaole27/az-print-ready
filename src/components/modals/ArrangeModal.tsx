@@ -63,7 +63,9 @@ export function ArrangeModal() {
     cards[0]?.assetIds.length > 1;
 
   const handleCancel = () => {
-    discardAssets(batchAssetIds);
+    if (!multiImport.isReAdd) {
+      discardAssets(batchAssetIds);
+    }
     setMultiImport(null);
   };
 

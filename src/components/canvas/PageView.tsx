@@ -1,11 +1,13 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Page, Settings } from '@/types';
+import { Page, Settings, PageElement } from '@/types';
 import { PAPERS } from '@/lib/constants/papers';
-import { getPageDimensionsMm, mmToScreenPx, MM_TO_PX } from '@/lib/pageGeometry';
+import { getPageDimensionsMm, mmToScreenPx, screenPxToMm, MM_TO_PX } from '@/lib/pageGeometry';
 import { formatSize } from '@/lib/units';
 import { useUiStore } from '@/store/useUiStore';
+import { useSessionStore } from '@/store/useSessionStore';
+import { nanoid } from 'nanoid';
 import { ElementBox } from './ElementBox';
 import { CutGuides } from './CutGuides';
 
@@ -40,11 +42,13 @@ export function PageView({
     selected,
     selectedIds,
     selectedPageId,
+    isAllSelected,
     groupDraft,
     select,
     clearSelection,
     guides,
     dropTargetPageId,
+    setDropTargetPageId,
   } = useUiStore();
   const paper = PAPERS.find((p) => p.id === page.paperId) || PAPERS[0];
   const { wMm, hMm } = getPageDimensionsMm(page);
@@ -234,6 +238,109 @@ export function PageView({
     onSelect();
   };
 
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    if (e.dataTransfer.types.includes('application/x-azpr-asset')) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      if (dropTargetPageId !== page.id) {
+        setDropTargetPageId(page.id);
+      }
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+    if (dropTargetPageId === page.id) {
+      setDropTargetPageId(null);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    const assetId = e.dataTransfer.getData('application/x-azpr-asset');
+    if (!assetId) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+    setDropTargetPageId(null);
+
+    const sessionStore = useSessionStore.getState();
+    const uiStore = useUiStore.getState();
+    const job = sessionStore.jobs.find((j) => j.id === jobId);
+    if (!job) return;
+
+    // 1. Determine size
+    let wMm: number;
+    let hMm: number;
+
+    const existingElement = job.pages
+      .flatMap((p) => p.elements)
+      .find((el) => el.assetId === assetId);
+
+    const { wMm: pageWMm, hMm: pageHMm } = getPageDimensionsMm(page);
+    const effectiveMargin = job.settings.borderless
+      ? 0
+      : (job.settings.marginMm ?? 6.35);
+    const printableW = Math.max(10, pageWMm - effectiveMargin * 2);
+    const printableH = Math.max(10, pageHMm - effectiveMargin * 2);
+
+    if (existingElement) {
+      wMm = existingElement.wMm;
+      hMm = existingElement.hMm;
+    } else {
+      const asset = sessionStore.assets.find((a) => a.id === assetId);
+      const ar =
+        asset && asset.pxW && asset.pxH
+          ? asset.pxW / asset.pxH
+          : 1;
+      const maxW = printableW * 0.5;
+      const maxH = printableH * 0.5;
+      if (ar >= maxW / maxH) {
+        wMm = maxW;
+        hMm = maxW / ar;
+      } else {
+        hMm = maxH;
+        wMm = maxH * ar;
+      }
+    }
+
+    wMm = Math.min(wMm, printableW);
+    hMm = Math.min(hMm, printableH);
+
+    // 2. Centered at drop point and clamped inside printable area
+    const rect = e.currentTarget.getBoundingClientRect();
+    const clickXPx = e.clientX - rect.left;
+    const clickYPx = e.clientY - rect.top;
+    const cursorXMm = screenPxToMm(clickXPx, zoom);
+    const cursorYMm = screenPxToMm(clickYPx, zoom);
+
+    const leftMm = cursorXMm - wMm / 2;
+    const topMm = cursorYMm - hMm / 2;
+
+    const minX = effectiveMargin;
+    const maxX = effectiveMargin + printableW - wMm;
+    const minY = effectiveMargin;
+    const maxY = effectiveMargin + printableH - hMm;
+
+    const clampedX = maxX >= minX ? Math.max(minX, Math.min(maxX, leftMm)) : minX;
+    const clampedY = maxY >= minY ? Math.max(minY, Math.min(maxY, topMm)) : minY;
+
+    const newElement: PageElement = {
+      id: nanoid(),
+      type: 'image',
+      assetId,
+      xMm: Math.round(clampedX * 100) / 100,
+      yMm: Math.round(clampedY * 100) / 100,
+      wMm: Math.round(wMm * 100) / 100,
+      hMm: Math.round(hMm * 100) / 100,
+      rotation: 0,
+    };
+
+    sessionStore.addElement(jobId, page.id, newElement);
+    uiStore.setActivePage(page.id);
+    uiStore.select({ pageId: page.id, elementId: newElement.id });
+    uiStore.setActiveAssetId(assetId);
+  };
+
   return (
     <div className="relative flex flex-col items-center" data-page-id={page.id}>
       {/* 4 corner crop marks 4px outside the page */}
@@ -283,6 +390,9 @@ export function PageView({
         onPointerDown={handleSheetPointerDown}
         onPointerMove={handleSheetPointerMove}
         onPointerUp={handleSheetPointerUp}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
         style={{
           width: `${pageWidthPx}px`,
           height: `${pageHeightPx}px`,
@@ -291,7 +401,7 @@ export function PageView({
         }}
         className={`relative overflow-hidden bg-sheet rounded-none cursor-pointer transition-shadow select-none ${
           isDropTarget
-            ? 'outline outline-3 outline-sheet-blue'
+            ? 'outline outline-2 outline-blue'
             : isActive
             ? 'outline outline-2 outline-sheet-blue'
             : ''
@@ -299,7 +409,7 @@ export function PageView({
       >
         {/* Drop Target Tint Overlay */}
         {isDropTarget && (
-          <div className="absolute inset-0 bg-sheet-blue/10 pointer-events-none z-30" />
+          <div className="absolute inset-0 bg-blue-tint pointer-events-none z-30" />
         )}
 
         {/* Margin Guides */}
@@ -397,6 +507,7 @@ export function PageView({
         {/* Page Elements */}
         {page.elements.map((el) => {
           const isSelected =
+            isAllSelected ||
             (selected?.pageId === page.id && selected?.elementId === el.id) ||
             (selectedPageId === page.id && selectedIds.includes(el.id));
           return (

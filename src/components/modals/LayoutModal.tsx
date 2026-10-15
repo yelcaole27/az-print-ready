@@ -62,7 +62,9 @@ export function LayoutModal() {
 
   const handleCancel = React.useCallback(() => {
     if (!multiImport) return;
-    discardAssets(multiImport.batchAssetIds);
+    if (!multiImport.isReAdd) {
+      discardAssets(multiImport.batchAssetIds);
+    }
     setMultiImport(null);
   }, [discardAssets, multiImport, setMultiImport]);
 

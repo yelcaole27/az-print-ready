@@ -45,6 +45,7 @@ export function ElementBox({
     setOverflow,
     selectedIds,
     selectedPageId,
+    isAllSelected,
     groupDraft,
     setGroupDraft,
     setSelection,
@@ -53,7 +54,7 @@ export function ElementBox({
   } = useUiStore();
 
   const isPartOfMulti = Boolean(
-    selectedPageId === page.id && selectedIds.includes(element.id)
+    isAllSelected || (selectedPageId === page.id && selectedIds.includes(element.id))
   );
 
   const isEditing =

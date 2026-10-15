@@ -586,6 +586,7 @@ export function RightPanel() {
     activeJobId,
     assets,
     addPage,
+    addBlocks,
     updateElement,
     rotateElement,
     duplicateElement,
@@ -608,7 +609,12 @@ export function RightPanel() {
     clearSelection,
     aspectLock,
     toggleAspectLock,
+    setLayoutMode,
+    setDocFit,
+    setActiveAssetId,
   } = useUiStore();
+
+  const [isHoveringNewPage, setIsHoveringNewPage] = useState(false);
 
   const activeJob = jobs.find((j) => j.id === activeJobId) || jobs[0];
   const unit = activeJob.settings.unit;
@@ -770,7 +776,48 @@ export function RightPanel() {
           <button
             type="button"
             onClick={() => addPage(activeJob.id)}
-            className="h-[56px] w-full rounded-[14px] border-[1.5px] border-dashed border-line hover:border-blue bg-surface2 text-ink hover:text-blue text-xs font-semibold flex items-center justify-center gap-2 cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue"
+            onDragOver={(e) => {
+              if (e.dataTransfer.types.includes('application/x-azpr-asset')) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'copy';
+                setIsHoveringNewPage(true);
+              }
+            }}
+            onDragLeave={() => {
+              setIsHoveringNewPage(false);
+            }}
+            onDrop={(e) => {
+              const assetId = e.dataTransfer.getData('application/x-azpr-asset');
+              setIsHoveringNewPage(false);
+              if (assetId && activeJob) {
+                e.preventDefault();
+                e.stopPropagation();
+                const res = addBlocks(activeJob.id, [
+                  { kind: 'fit', assetIds: [assetId] },
+                ]);
+                if (res.ok) {
+                  setActiveAssetId(assetId);
+                  if (res.firstPageId) {
+                    setActivePage(res.firstPageId);
+                    const updatedJob = useSessionStore
+                      .getState()
+                      .jobs.find((j) => j.id === activeJob.id);
+                    const page = updatedJob?.pages.find((p) => p.id === res.firstPageId);
+                    const el =
+                      page?.elements.find((item) => item.assetId === assetId) ||
+                      page?.elements[0];
+                    if (page && el) {
+                      select({ pageId: page.id, elementId: el.id });
+                    }
+                  }
+                }
+              }
+            }}
+            className={`h-[56px] w-full rounded-[14px] border-[1.5px] border-dashed text-xs font-semibold flex items-center justify-center gap-2 cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue ${
+              isHoveringNewPage
+                ? 'border-blue text-blue bg-blue-tint'
+                : 'border-line hover:border-blue bg-surface2 text-ink hover:text-blue'
+            }`}
           >
             <Plus className="w-4 h-4" />
             <span>+ New page</span>

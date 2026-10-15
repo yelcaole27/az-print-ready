@@ -18,12 +18,15 @@ import {
   Hand,
   Image as ImageIcon,
 } from 'lucide-react';
-import { useSessionStore } from '@/store/useSessionStore';
+import { useSessionStore, getJobAssetIds } from '@/store/useSessionStore';
 import { useUiStore } from '@/store/useUiStore';
 import { PAPERS } from '@/lib/constants/papers';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { unitToMm } from '@/lib/units';
 import { importFiles } from '@/lib/importImages';
+import { SIZE_PRESETS } from '@/lib/constants/sizePresets';
+import { ImageAsset } from '@/types';
+import { nanoid } from 'nanoid';
 
 function Switch({
   checked,
@@ -78,6 +81,97 @@ const MORE_SIZE_PRESETS: SizePreset[] = [
   { id: 'a6', name: 'A6', wMm: 105, hMm: 148 },
 ];
 
+interface QuickSet {
+  id: string;
+  label: string;
+  size: {
+    id: string;
+    wMm: number;
+    hMm: number;
+  };
+  qty: number;
+  isBuiltIn?: boolean;
+}
+
+function formatQuickSetLabel(
+  size: { id: string; wMm: number; hMm: number },
+  qty: number
+): string {
+  const preset =
+    SIZE_PRESETS.find((p) => p.id === size.id) ||
+    MORE_SIZE_PRESETS.find((p) => p.id === size.id);
+  const sizeName =
+    preset?.name ||
+    (size.id.startsWith('custom-')
+      ? `${Math.round(size.wMm)}x${Math.round(size.hMm)}`
+      : size.id);
+  return `${sizeName} \u00D7 ${qty}`;
+}
+
+function createBuiltInQuickSet(
+  id: string,
+  size: { id: string; wMm: number; hMm: number },
+  qty: number
+): QuickSet {
+  return {
+    id,
+    label: formatQuickSetLabel(size, qty),
+    size,
+    qty,
+    isBuiltIn: true,
+  };
+}
+
+const BUILT_IN_QUICK_SETS: QuickSet[] = [
+  createBuiltInQuickSet('builtin-1x1-6', { id: '1x1', wMm: 25.4, hMm: 25.4 }, 6),
+  createBuiltInQuickSet('builtin-2x2-4', { id: '2x2', wMm: 50.8, hMm: 50.8 }, 4),
+  createBuiltInQuickSet('builtin-wallet-8', { id: 'wallet', wMm: 63.5, hMm: 88.9 }, 8),
+];
+
+function loadCustomQuickSets(): QuickSet[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem('azpr-quicksets');
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.slice(0, 8).map((item) => ({
+        id: String(item.id || nanoid()),
+        label: String(item.label || ''),
+        size: {
+          id: String(item.size?.id || 'custom'),
+          wMm: Number(item.size?.wMm) || 50,
+          hMm: Number(item.size?.hMm) || 50,
+        },
+        qty: Math.max(1, Math.min(500, Number(item.qty) || 1)),
+        isBuiltIn: false,
+      }));
+    }
+  } catch {
+    // Storage blocked or invalid
+  }
+  return [];
+}
+
+function saveCustomQuickSets(customSets: QuickSet[]) {
+  if (typeof window === 'undefined') return;
+  try {
+    const toStore = customSets.slice(0, 8).map((s) => ({
+      id: s.id,
+      label: s.label,
+      size: {
+        id: s.size.id,
+        wMm: s.size.wMm,
+        hMm: s.size.hMm,
+      },
+      qty: s.qty,
+    }));
+    localStorage.setItem('azpr-quicksets', JSON.stringify(toStore));
+  } catch {
+    // Storage blocked
+  }
+}
+
 export function Sidebar() {
   const {
     jobs,
@@ -87,12 +181,15 @@ export function Sidebar() {
     addJob,
     removeJob,
     removeAsset,
+    deleteAllJobPictures,
     setJobPaper,
     setJobOrientation,
     setBorderless,
     setPictureSize,
     setPictureQty,
     setPictureFillPage,
+    setPictureSizeAndQty,
+    addBlocks,
     updateSettings,
     hasManualEdits,
     alignElements,
@@ -107,8 +204,16 @@ export function Sidebar() {
     selected,
     selectedIds,
     selectedPageId,
+    isAllSelected,
+    toggleSelectAll,
     activePageId,
     openConfirmModal,
+    setLayoutMode,
+    setDocFit,
+    setActivePage,
+    select,
+    setMultiImport,
+    setDraggingAssetId,
   } = useUiStore();
 
   const activeJob = jobs.find((j) => j.id === activeJobId) || jobs[0];
@@ -235,16 +340,155 @@ export function Sidebar() {
     removeJob(job.id);
   };
 
+  const jobPictureAssetIds = React.useMemo(() => {
+    if (!activeJob) return [];
+    return getJobAssetIds(activeJob);
+  }, [activeJob]);
+
+  const jobPicturesCount = jobPictureAssetIds.length;
+
+  const jobAssets = React.useMemo(() => {
+    return jobPictureAssetIds
+      .map((id) => assets.find((a) => a.id === id))
+      .filter((a): a is ImageAsset => Boolean(a));
+  }, [assets, jobPictureAssetIds]);
+
+  const handlePictureClick = (assetId: string) => {
+    if (!activeJob) return;
+    const isStart = !activeJob.pages.some((p) => p.elements && p.elements.length > 0);
+
+    if (isStart) {
+      const res = addBlocks(activeJob.id, [
+        { kind: 'fit', assetIds: [assetId] },
+      ]);
+      if (res.ok) {
+        setLayoutMode('document');
+        setDocFit('fit-page');
+        setActiveAssetId(assetId);
+        if (res.firstPageId) {
+          setActivePage(res.firstPageId);
+          const updatedJob = useSessionStore
+            .getState()
+            .jobs.find((j) => j.id === activeJob.id);
+          const page = updatedJob?.pages.find((p) => p.id === res.firstPageId);
+          const el = page?.elements.find((e) => e.assetId === assetId) || page?.elements[0];
+          if (page && el) {
+            select({ pageId: page.id, elementId: el.id });
+          }
+        }
+      }
+    } else {
+      setActiveAssetId(assetId);
+      const pageWithElement = activeJob.pages.find((p) =>
+        p.elements.some((el) => el.assetId === assetId)
+      );
+      if (pageWithElement) {
+        const el = pageWithElement.elements.find((e) => e.assetId === assetId);
+        if (el) {
+          select({ pageId: pageWithElement.id, elementId: el.id });
+          setActivePage(pageWithElement.id);
+        }
+      } else {
+        const res = addBlocks(activeJob.id, [
+          { kind: 'fit', assetIds: [assetId] },
+        ]);
+        if (res.ok) {
+          setActiveAssetId(assetId);
+          if (res.firstPageId) {
+            setActivePage(res.firstPageId);
+            const updatedJob = useSessionStore
+              .getState()
+              .jobs.find((j) => j.id === activeJob.id);
+            const page = updatedJob?.pages.find((p) => p.id === res.firstPageId);
+            const el = page?.elements.find((e) => e.assetId === assetId) || page?.elements[0];
+            if (page && el) {
+              select({ pageId: page.id, elementId: el.id });
+            }
+          }
+        }
+      }
+    }
+  };
+
+  const handleAllClick = () => {
+    if (!activeJob) return;
+    const isStart = !activeJob.pages.some((p) => p.elements && p.elements.length > 0);
+
+    if (isStart) {
+      if (jobPicturesCount >= 2) {
+        const batchAssetIds = [...jobPictureAssetIds];
+        setMultiImport({
+          step: 'arrange',
+          batchAssetIds,
+          cards: batchAssetIds.map((id) => ({
+            id: nanoid(),
+            assetIds: [id],
+          })),
+          layoutStepIndex: 0,
+          chosenLayouts: {},
+          isReAdd: true,
+        });
+      } else if (jobPicturesCount === 1) {
+        handlePictureClick(jobPictureAssetIds[0]);
+      }
+    } else {
+      toggleSelectAll();
+    }
+  };
+
+  const handleDeleteAllPictures = () => {
+    if (!activeJob || jobPicturesCount === 0) return;
+    openConfirmModal({
+      title: 'Delete all',
+      accentWord: 'pictures?',
+      message: 'This removes them from every page.',
+      confirmLabel: 'Delete all',
+      cancelLabel: 'Cancel',
+      destructive: true,
+      onConfirm: () => {
+        deleteAllJobPictures(activeJob.id);
+      },
+    });
+  };
+
+  const targetAssetIds: string[] = React.useMemo(() => {
+    if (isAllSelected) {
+      return jobPictureAssetIds;
+    }
+    if (selectedIds.length >= 2 && selectedPageId && activeJob) {
+      const page = activeJob.pages.find((p) => p.id === selectedPageId);
+      if (page) {
+        return Array.from(
+          new Set(
+            page.elements
+              .filter((el) => selectedIds.includes(el.id))
+              .map((el) => el.assetId)
+              .filter((id): id is string => Boolean(id))
+          )
+        );
+      }
+    }
+    if (activeAssetId) {
+      return [activeAssetId];
+    }
+    return [];
+  }, [isAllSelected, jobPictureAssetIds, selectedIds, selectedPageId, activeJob, activeAssetId]);
+
   // Active asset, block, and sheet row lookup
   const activeAsset = assets.find((a) => a.id === activeAssetId);
   const activeBlock = activeAsset
     ? activeJob?.blocks.find((b) => b.assetIds.includes(activeAsset.id))
-    : null;
+    : (targetAssetIds.length > 0
+        ? activeJob?.blocks.find((b) => b.assetIds.some((id) => targetAssetIds.includes(id)))
+        : null);
 
   const activeRow =
-    activeAsset && activeBlock?.kind === 'sheet'
+    (activeAsset && activeBlock?.kind === 'sheet'
       ? activeBlock.rows?.find((r) => r.assetId === activeAsset.id)
-      : undefined;
+      : undefined) ||
+    (targetAssetIds.length > 0
+      ? activeJob?.blocks.find((b) => b.kind === 'sheet')?.rows?.find((r) => targetAssetIds.includes(r.assetId))
+      : undefined);
 
   const isCollageBlock = Boolean(
     activeBlock && activeBlock.kind === 'collage'
@@ -265,8 +509,8 @@ export function Sidebar() {
       | { mode: 'fill' }
       | { mode: 'width' }
   ) => {
-    if (!activeJob || !activeAssetId) return;
-    const res = setPictureSize(activeJob.id, activeAssetId, spec);
+    if (!activeJob || targetAssetIds.length === 0) return;
+    const res = setPictureSize(activeJob.id, targetAssetIds, spec);
     if (res === 'needs-confirm') {
       openConfirmModal({
         title: 'Reset manual',
@@ -275,7 +519,7 @@ export function Sidebar() {
         confirmLabel: 'Reset and apply',
         destructive: true,
         onConfirm: () => {
-          setPictureSize(activeJob.id, activeAssetId, spec, { force: true });
+          setPictureSize(activeJob.id, targetAssetIds, spec, { force: true });
         },
       });
     }
@@ -300,30 +544,10 @@ export function Sidebar() {
   };
 
   const handleQtyInput = (val: string) => {
-    if (!activeJob || !activeAsset || !activeRow) return;
+    if (!activeJob || targetAssetIds.length === 0) return;
     const parsed = parseInt(val, 10);
-    const clamped = Math.min(500, Math.max(1, isNaN(parsed) ? activeRow.qty : parsed));
-    if (clamped !== activeRow.qty || activeRow.fillPage) {
-      const res = setPictureQty(activeJob.id, activeAsset.id, clamped);
-      if (res === 'needs-confirm') {
-        openConfirmModal({
-          title: 'Reset manual',
-          accentWord: 'changes?',
-          message: 'Changing quantity will rearrange pictures on the page.',
-          confirmLabel: 'Reset and apply',
-          destructive: true,
-          onConfirm: () => {
-            setPictureQty(activeJob.id, activeAsset.id, clamped, { force: true });
-          },
-        });
-      }
-    }
-  };
-
-  const handleQtyStep = (delta: number) => {
-    if (!activeJob || !activeAsset || !activeRow) return;
-    const nextQty = Math.min(500, Math.max(1, activeRow.qty + delta));
-    const res = setPictureQty(activeJob.id, activeAsset.id, nextQty);
+    const clamped = Math.min(500, Math.max(1, isNaN(parsed) ? (activeRow?.qty ?? 1) : parsed));
+    const res = setPictureQty(activeJob.id, targetAssetIds, clamped);
     if (res === 'needs-confirm') {
       openConfirmModal({
         title: 'Reset manual',
@@ -332,16 +556,35 @@ export function Sidebar() {
         confirmLabel: 'Reset and apply',
         destructive: true,
         onConfirm: () => {
-          setPictureQty(activeJob.id, activeAsset.id, nextQty, { force: true });
+          setPictureQty(activeJob.id, targetAssetIds, clamped, { force: true });
+        },
+      });
+    }
+  };
+
+  const handleQtyStep = (delta: number) => {
+    if (!activeJob || targetAssetIds.length === 0) return;
+    const currentQty = activeRow?.qty ?? 1;
+    const nextQty = Math.min(500, Math.max(1, currentQty + delta));
+    const res = setPictureQty(activeJob.id, targetAssetIds, nextQty);
+    if (res === 'needs-confirm') {
+      openConfirmModal({
+        title: 'Reset manual',
+        accentWord: 'changes?',
+        message: 'Changing quantity will rearrange pictures on the page.',
+        confirmLabel: 'Reset and apply',
+        destructive: true,
+        onConfirm: () => {
+          setPictureQty(activeJob.id, targetAssetIds, nextQty, { force: true });
         },
       });
     }
   };
 
   const handleToggleFillPage = () => {
-    if (!activeJob || !activeAsset || !activeRow) return;
-    const nextFill = !activeRow.fillPage;
-    const res = setPictureFillPage(activeJob.id, activeAsset.id, nextFill);
+    if (!activeJob || targetAssetIds.length === 0) return;
+    const nextFill = !(activeRow?.fillPage ?? false);
+    const res = setPictureFillPage(activeJob.id, targetAssetIds, nextFill);
     if (res === 'needs-confirm') {
       openConfirmModal({
         title: 'Reset manual',
@@ -350,7 +593,7 @@ export function Sidebar() {
         confirmLabel: 'Reset and fill',
         destructive: true,
         onConfirm: () => {
-          setPictureFillPage(activeJob.id, activeAsset.id, nextFill, { force: true });
+          setPictureFillPage(activeJob.id, targetAssetIds, nextFill, { force: true });
         },
       });
     }
@@ -392,6 +635,58 @@ export function Sidebar() {
     ((activeBlock?.kind === 'fill' || activeBlock?.kind === 'width') ||
       (Boolean(activeRow) &&
         !['1x1', '1.5x1.5', '2x2', 'wallet'].includes(activeRow?.size.id || '')));
+
+  const [customQuickSets, setCustomQuickSets] = useState<QuickSet[]>(() => loadCustomQuickSets());
+
+  const allQuickSets = React.useMemo(() => {
+    return [...BUILT_IN_QUICK_SETS, ...customQuickSets];
+  }, [customQuickSets]);
+
+  const applyQuickSet = (chip: QuickSet) => {
+    if (!activeJob || targetAssetIds.length === 0) return;
+    const res = setPictureSizeAndQty(activeJob.id, targetAssetIds, chip.size, chip.qty);
+    if (res === 'needs-confirm') {
+      openConfirmModal({
+        title: 'Reset manual',
+        accentWord: 'changes?',
+        message: 'Applying this quick set will rearrange pictures on the page.',
+        confirmLabel: 'Reset and apply',
+        destructive: true,
+        onConfirm: () => {
+          setPictureSizeAndQty(activeJob.id, targetAssetIds, chip.size, chip.qty, { force: true });
+        },
+      });
+    }
+  };
+
+  const isSaveFull = customQuickSets.length >= 8;
+  const isSaveDisabled =
+    isSaveFull ||
+    targetAssetIds.length === 0 ||
+    !activeRow ||
+    isDefaultActive ||
+    activeBlock?.kind === 'fit';
+
+  const handleSaveQuickSet = () => {
+    if (isSaveDisabled || !activeRow) return;
+    const label = formatQuickSetLabel(activeRow.size, activeRow.qty);
+    const newChip: QuickSet = {
+      id: nanoid(),
+      label,
+      size: { ...activeRow.size },
+      qty: activeRow.qty,
+      isBuiltIn: false,
+    };
+    const nextList = [...customQuickSets, newChip].slice(0, 8);
+    setCustomQuickSets(nextList);
+    saveCustomQuickSets(nextList);
+  };
+
+  const handleDeleteCustomQuickSet = (id: string) => {
+    const nextList = customQuickSets.filter((s) => s.id !== id);
+    setCustomQuickSets(nextList);
+    saveCustomQuickSets(nextList);
+  };
 
   return (
     <aside
@@ -628,23 +923,73 @@ export function Sidebar() {
 
           {/* PICTURES Section */}
           <div className="flex flex-col shrink-0">
-            <h2 className="text-[11.5px] font-bold uppercase tracking-[0.14em] text-faint mb-2.5">
-              Pictures
-            </h2>
+            <div className="flex items-center justify-between mb-2.5">
+              <h2 className="text-[11.5px] font-bold uppercase tracking-[0.14em] text-faint">
+                Pictures
+              </h2>
+              {jobPicturesCount >= 1 && (
+                <button
+                  type="button"
+                  onClick={handleDeleteAllPictures}
+                  className="text-[11.5px] font-bold text-red hover:underline bg-transparent cursor-pointer select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue rounded"
+                >
+                  Delete all
+                </button>
+              )}
+            </div>
 
-            {assets.length === 0 ? (
+            {jobAssets.length === 0 ? (
               <div className="flex items-center gap-2 py-3 px-3 rounded-[14px] bg-surface2 border border-line text-xs text-muted mb-2.5">
                 <ImageIcon className="w-4 h-4 shrink-0 text-faint" />
                 <span>No pictures added yet.</span>
               </div>
             ) : (
               <div className="flex flex-wrap gap-[10px] mb-2.5">
-                {assets.map((asset) => {
+                {jobAssets.map((asset) => {
                   const isActive = asset.id === activeAssetId;
                   return (
                     <div
                       key={asset.id}
-                      onClick={() => setActiveAssetId(asset.id)}
+                      draggable={true}
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData('application/x-azpr-asset', asset.id);
+                        e.dataTransfer.setData('text/plain', asset.id);
+                        e.dataTransfer.effectAllowed = 'copy';
+                        setDraggingAssetId(asset.id);
+
+                        // Ghost under cursor: 62px, 80% opacity, non-animated
+                        const ghost = document.createElement('div');
+                        ghost.style.position = 'fixed';
+                        ghost.style.top = '-9999px';
+                        ghost.style.left = '-9999px';
+                        ghost.style.width = '62px';
+                        ghost.style.height = '62px';
+                        ghost.style.borderRadius = '14px';
+                        ghost.style.overflow = 'hidden';
+                        ghost.style.opacity = '0.8';
+                        ghost.style.pointerEvents = 'none';
+                        ghost.style.zIndex = '99999';
+
+                        const img = document.createElement('img');
+                        img.src = asset.objectUrl;
+                        img.style.width = '100%';
+                        img.style.height = '100%';
+                        img.style.objectFit = 'cover';
+                        ghost.appendChild(img);
+
+                        document.body.appendChild(ghost);
+                        e.dataTransfer.setDragImage(ghost, 31, 31);
+
+                        setTimeout(() => {
+                          ghost.remove();
+                        }, 0);
+                      }}
+                      onDragEnd={() => {
+                        setDraggingAssetId(null);
+                        useUiStore.getState().setDropTargetPageId(null);
+                        useUiStore.getState().setIsHoveringAddPage(false);
+                      }}
+                      onClick={() => handlePictureClick(asset.id)}
                       className={`group relative w-[62px] h-[62px] rounded-[14px] overflow-hidden bg-surface2 cursor-pointer transition-all ${
                         isActive
                           ? 'border-2 border-blue shadow-xs'
@@ -682,6 +1027,20 @@ export function Sidebar() {
                     </div>
                   );
                 })}
+                {jobPicturesCount >= 2 && (
+                  <button
+                    type="button"
+                    onClick={handleAllClick}
+                    aria-label={isAllSelected ? 'Deselect all pictures' : 'Select all pictures'}
+                    className={`w-[62px] h-[62px] rounded-[14px] flex items-center justify-center font-bold text-xs transition-all cursor-pointer select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue ${
+                      isAllSelected
+                        ? 'border-2 border-blue bg-blue-tint text-blue shadow-xs'
+                        : 'border-[1.5px] border-line hover:border-line2 bg-surface2 text-ink'
+                    }`}
+                  >
+                    All
+                  </button>
+                )}
               </div>
             )}
 
@@ -709,15 +1068,10 @@ export function Sidebar() {
               Size
             </h2>
 
-            {!activeAsset || selectedIds.length >= 2 ? (
+            {!activeAsset && targetAssetIds.length === 0 ? (
               <div className="flex items-center gap-2 py-3 px-3 rounded-[14px] bg-surface2 border border-line text-xs text-muted">
                 <MousePointerClick className="w-4 h-4 shrink-0 text-faint" />
                 <span>Pick a picture to change its size.</span>
-              </div>
-            ) : isOnFreePage ? (
-              <div className="flex items-center gap-2 py-3 px-3 rounded-[14px] bg-surface2 border border-line text-xs text-muted">
-                <Hand className="w-4 h-4 shrink-0 text-faint" />
-                <span>Placed by hand on the page.</span>
               </div>
             ) : (
               <>
@@ -967,12 +1321,56 @@ export function Sidebar() {
                     Change layout
                   </button>
                 )}
+
+                {/* Quick sets */}
+                <div className="flex flex-col mt-3.5 pt-3 border-t border-line">
+                  <h3 className="text-[11.5px] font-bold uppercase tracking-[0.14em] text-faint mb-2">
+                    Quick sets
+                  </h3>
+                  <div className="flex flex-wrap gap-2 items-center">
+                    {allQuickSets.map((chip) => (
+                      <div key={chip.id} className="group relative inline-flex items-center">
+                        <button
+                          type="button"
+                          onClick={() => applyQuickSet(chip)}
+                          className="h-[32px] px-3 rounded-[12px] border-[1.5px] border-line bg-surface2 text-ink hover:border-line2 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue"
+                        >
+                          <span>{chip.label}</span>
+                        </button>
+                        {!chip.isBuiltIn && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteCustomQuickSet(chip.id);
+                            }}
+                            aria-label={`Remove ${chip.label}`}
+                            className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-surface2 border border-line hover:border-red hover:bg-red hover:text-white text-muted flex items-center justify-center opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity cursor-pointer focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue"
+                          >
+                            <X className="w-2.5 h-2.5" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+
+                    <button
+                      type="button"
+                      disabled={isSaveDisabled}
+                      title={isSaveFull ? 'Remove one first' : undefined}
+                      onClick={handleSaveQuickSet}
+                      className="h-[32px] px-3 rounded-[12px] border-[1.5px] border-dashed border-line bg-surface2 text-ink hover:text-blue hover:border-blue text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-40 disabled:pointer-events-none disabled:hover:text-ink disabled:hover:border-line select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Save</span>
+                    </button>
+                  </div>
+                </div>
               </>
             )}
           </div>
 
           {/* HOW MANY? Section */}
-          {activeRow && selectedIds.length < 2 && (
+          {(activeRow || (targetAssetIds.length > 0 && activeJob?.blocks.some((b) => b.kind === 'sheet' && b.rows?.some((r) => targetAssetIds.includes(r.assetId))))) && (
             <div className="flex flex-col shrink-0">
               <h2 className="text-[11.5px] font-bold uppercase tracking-[0.14em] text-faint mb-2.5">
                 How many?
@@ -990,11 +1388,11 @@ export function Sidebar() {
                     -
                   </button>
                   <input
-                    key={`${activeRow.assetId}-${activeRow.qty}-${activeRow.fillPage ? 'fill' : 'normal'}`}
+                    key={`${targetAssetIds.join('-')}-${activeRow?.qty ?? 1}-${activeRow?.fillPage ? 'fill' : 'normal'}`}
                     type="number"
                     min={1}
                     max={500}
-                    defaultValue={activeRow.qty}
+                    defaultValue={activeRow?.qty ?? 1}
                     onBlur={(e) => handleQtyInput(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
@@ -1019,9 +1417,9 @@ export function Sidebar() {
                 <button
                   type="button"
                   onClick={handleToggleFillPage}
-                  aria-pressed={activeRow.fillPage ?? false}
+                  aria-pressed={Boolean(activeRow?.fillPage)}
                   className={`h-[48px] px-3.5 rounded-[12px] border-[1.5px] text-xs font-semibold transition-all cursor-pointer shrink-0 ${
-                    activeRow.fillPage
+                    activeRow?.fillPage
                       ? 'border-blue bg-blue-tint text-blue'
                       : 'border-line bg-surface2 text-ink hover:border-line2'
                   } focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue`}

@@ -23,6 +23,7 @@ export interface MultiImportState {
   cards: MultiImportCard[];
   layoutStepIndex: number;
   chosenLayouts: Record<string, 'best' | 'grid' | 'column' | 'row'>;
+  isReAdd?: boolean;
 }
 
 export interface ConfirmModalState {
@@ -49,6 +50,7 @@ interface UiState {
   selected: { pageId: string; elementId: string } | null;
   selectedIds: string[];
   selectedPageId: string | null;
+  isAllSelected: boolean;
   groupDraft: { pageId: string; dxMm: number; dyMm: number } | null;
 
   // Layout Mode
@@ -60,6 +62,7 @@ interface UiState {
   // Transient Guides and Controls
   guides: { axis: 'x' | 'y'; posMm: number }[];
   dropTargetPageId: string | null;
+  draggingAssetId: string | null;
   isHoveringAddPage: boolean;
   aspectLock: boolean;
 
@@ -122,11 +125,14 @@ interface UiState {
   select: (sel: { pageId: string; elementId: string } | null) => void;
   setSelection: (pageId: string, ids: string[]) => void;
   clearSelection: () => void;
+  setIsAllSelected: (val: boolean) => void;
+  toggleSelectAll: () => void;
   setGroupDraft: (draft: { pageId: string; dxMm: number; dyMm: number } | null) => void;
 
   setGuides: (guides: { axis: 'x' | 'y'; posMm: number }[]) => void;
   clearGuides: () => void;
   setDropTargetPageId: (id: string | null) => void;
+  setDraggingAssetId: (id: string | null) => void;
   setIsHoveringAddPage: (hovering: boolean) => void;
   setAspectLock: (lock: boolean) => void;
   toggleAspectLock: () => void;
@@ -193,6 +199,7 @@ export const useUiStore = create<UiState>((set) => ({
   selected: null,
   selectedIds: [],
   selectedPageId: null,
+  isAllSelected: false,
   groupDraft: null,
 
   layoutMode: 'sheet',
@@ -201,6 +208,7 @@ export const useUiStore = create<UiState>((set) => ({
 
   guides: [],
   dropTargetPageId: null,
+  draggingAssetId: null,
   isHoveringAddPage: false,
   aspectLock: true,
 
@@ -296,7 +304,21 @@ export const useUiStore = create<UiState>((set) => ({
   },
 
   setActiveAssetId: (id: string | null) => {
-    set({ activeAssetId: id });
+    set({ activeAssetId: id, isAllSelected: false });
+  },
+
+  setIsAllSelected: (val: boolean) => {
+    set({ isAllSelected: val });
+  },
+
+  toggleSelectAll: () => {
+    set((state) => ({
+      isAllSelected: !state.isAllSelected,
+      selected: null,
+      selectedIds: [],
+      selectedPageId: null,
+      activeAssetId: null,
+    }));
   },
 
   select: (sel: { pageId: string; elementId: string } | null) => {
@@ -305,6 +327,7 @@ export const useUiStore = create<UiState>((set) => ({
       selectedIds: [],
       selectedPageId: null,
       groupDraft: null,
+      isAllSelected: false,
     });
   },
 
@@ -315,6 +338,7 @@ export const useUiStore = create<UiState>((set) => ({
         selectedIds: [],
         selectedPageId: null,
         groupDraft: null,
+        isAllSelected: false,
       });
     } else if (ids.length === 1) {
       set({
@@ -322,6 +346,7 @@ export const useUiStore = create<UiState>((set) => ({
         selectedIds: [],
         selectedPageId: null,
         groupDraft: null,
+        isAllSelected: false,
       });
     } else {
       set({
@@ -329,6 +354,7 @@ export const useUiStore = create<UiState>((set) => ({
         selectedIds: ids,
         selectedPageId: pageId,
         groupDraft: null,
+        isAllSelected: false,
       });
     }
   },
@@ -339,6 +365,7 @@ export const useUiStore = create<UiState>((set) => ({
       selectedIds: [],
       selectedPageId: null,
       groupDraft: null,
+      isAllSelected: false,
     });
   },
 
@@ -356,6 +383,10 @@ export const useUiStore = create<UiState>((set) => ({
 
   setDropTargetPageId: (id: string | null) => {
     set({ dropTargetPageId: id });
+  },
+
+  setDraggingAssetId: (id: string | null) => {
+    set({ draggingAssetId: id });
   },
 
   setIsHoveringAddPage: (hovering: boolean) => {

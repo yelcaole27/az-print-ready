@@ -15,8 +15,16 @@ export function PageStack() {
   const dragCounter = useRef<number>(0);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
 
-  const { jobs, activeJobId, addPage, removePage, removeElement, removeElements, nudgeGroup } =
-    useSessionStore();
+  const {
+    jobs,
+    activeJobId,
+    addPage,
+    addBlocks,
+    removePage,
+    removeElement,
+    removeElements,
+    nudgeGroup,
+  } = useSessionStore();
   const {
     zoom,
     zoomMode,
@@ -26,6 +34,9 @@ export function PageStack() {
     setActivePage,
     clearSelection,
     isHoveringAddPage,
+    setIsHoveringAddPage,
+    setActiveAssetId,
+    select,
   } = useUiStore();
 
   const activeJob = jobs.find((j) => j.id === activeJobId) || jobs[0];
@@ -58,7 +69,7 @@ export function PageStack() {
       if (isInput || Boolean(useUiStore.getState().multiImport)) return;
 
       // Select all elements on active page Ctrl/Cmd+A
-      if ((e.ctrlKey || e.metaKey) && (e.key === 'a' || e.key === 'A')) {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'a' || e.key === 'A')) {
         const { isSettingsOpen, editingBlockLayoutId, activePageId, setSelection } =
           useUiStore.getState();
         if (isSettingsOpen || editingBlockLayoutId) return;
@@ -283,17 +294,21 @@ export function PageStack() {
 
   // Delete page handler with active page fallback
   const handleDeletePage = (pageId: string) => {
-    if (pages.length <= 1) return;
     const pageIndex = pages.findIndex((p) => p.id === pageId);
+    const remaining = pages.filter((p) => p.id !== pageId);
 
-    if (activePageId === pageId) {
-      const prevIndex = Math.max(0, pageIndex - 1);
-      const remaining = pages.filter((p) => p.id !== pageId);
-      if (remaining[prevIndex]) {
-        setActivePage(remaining[prevIndex].id);
+    if (remaining.length > 0) {
+      if (activePageId === pageId) {
+        const prevIndex = Math.max(0, pageIndex - 1);
+        if (remaining[prevIndex]) {
+          setActivePage(remaining[prevIndex].id);
+        }
       }
+    } else {
+      setActivePage(null);
     }
 
+    clearSelection();
     removePage(activeJob.id, pageId);
   };
 
@@ -316,16 +331,18 @@ export function PageStack() {
   };
 
   const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'copy';
+    if (e.dataTransfer.types.includes('Files')) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+    }
   };
 
   const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
     dragCounter.current = 0;
     setIsDraggingOver(false);
     const files = Array.from(e.dataTransfer.files);
     if (files.length > 0) {
+      e.preventDefault();
       importFiles(files);
     }
   };
@@ -372,18 +389,63 @@ export function PageStack() {
             showMargins={showMargins}
             onSelect={() => setActivePage(page.id)}
             onDelete={() => handleDeletePage(page.id)}
-            canDelete={pages.length > 1}
+            canDelete={true}
           />
         ))}
 
-        {/* Add Page Button */}
-        <div className="pt-2">
+        {/* Add Page Button and space below last page */}
+        <div
+          data-drop-newpage-area="true"
+          className="pt-2 pb-16 w-full flex flex-col items-center justify-center"
+          onDragOver={(e) => {
+            if (e.dataTransfer.types.includes('application/x-azpr-asset')) {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'copy';
+              if (!isHoveringAddPage) {
+                setIsHoveringAddPage(true);
+              }
+            }
+          }}
+          onDragLeave={(e) => {
+            if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+            setIsHoveringAddPage(false);
+          }}
+          onDrop={(e) => {
+            const assetId = e.dataTransfer.getData('application/x-azpr-asset');
+            setIsHoveringAddPage(false);
+            if (assetId && activeJob) {
+              e.preventDefault();
+              e.stopPropagation();
+              const res = addBlocks(activeJob.id, [
+                { kind: 'fit', assetIds: [assetId] },
+              ]);
+              if (res.ok) {
+                setActiveAssetId(assetId);
+                if (res.firstPageId) {
+                  setActivePage(res.firstPageId);
+                  const updatedJob = useSessionStore
+                    .getState()
+                    .jobs.find((j) => j.id === activeJob.id);
+                  const page = updatedJob?.pages.find((p) => p.id === res.firstPageId);
+                  const el =
+                    page?.elements.find((item) => item.assetId === assetId) ||
+                    page?.elements[0];
+                  if (page && el) {
+                    select({ pageId: page.id, elementId: el.id });
+                  }
+                }
+              }
+            }
+          }}
+        >
           <Button
             variant="outline"
             data-drop-newpage="true"
             onClick={() => addPage(activeJob.id)}
             className={`flex items-center gap-1.5 transition-all ${
-              isHoveringAddPage ? 'border-dashed border-2 border-blue' : ''
+              isHoveringAddPage
+                ? 'border-dashed border-[1.5px] border-blue text-blue bg-blue-tint'
+                : ''
             }`}
           >
             <Plus className="w-3.5 h-3.5" />
