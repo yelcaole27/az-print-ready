@@ -82,7 +82,7 @@ export function ModalShell({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(5,6,9,0.62)] backdrop-blur-[3px] p-6 select-none"
       role="presentation"
       onClick={(e) => {
         if (e.target === e.currentTarget) {
@@ -98,7 +98,7 @@ export function ModalShell({
         tabIndex={-1}
         className={
           className ||
-          'w-[min(960px,92vw)] max-h-[86vh] flex flex-col bg-paper rounded-[16px] p-6 shadow-2xl border border-line text-ink relative overflow-hidden focus:outline-none'
+          'w-[min(1040px,calc(100vw-48px))] max-h-[90vh] flex flex-col bg-surface rounded-[28px] px-[36px] pt-[32px] pb-[28px] border border-line2 text-ink relative overflow-hidden shadow-[0_40px_100px_-20px_rgba(0,0,0,0.7)] focus:outline-none'
         }
       >
         {children}

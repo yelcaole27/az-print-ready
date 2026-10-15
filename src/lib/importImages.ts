@@ -80,11 +80,6 @@ export async function importFiles(files: File[]): Promise<void> {
           const updatedJob = useSessionStore
             .getState()
             .jobs.find((j) => j.id === activeJob.id);
-          const pageCount = updatedJob?.pages.length || 1;
-          uiStore.setMessage({
-            type: 'info',
-            text: `Ready. ${pageCount} page(s)`,
-          });
         }
       } else if (!isStartState && activeJob) {
         const res = sessionStore.addBlocks(activeJob.id, [
@@ -95,10 +90,6 @@ export async function importFiles(files: File[]): Promise<void> {
           if (res.firstPageId) {
             uiStore.setActivePage(res.firstPageId);
           }
-          uiStore.setMessage({
-            type: 'info',
-            text: 'Added',
-          });
         } else if (res.reason) {
           uiStore.setMessage({
             type: 'warn',

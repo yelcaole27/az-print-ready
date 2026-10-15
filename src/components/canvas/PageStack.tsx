@@ -346,7 +346,7 @@ export function PageStack() {
       onDragOver={handleDragOver}
       onDrop={handleDrop}
       data-canvas-scroll="true"
-      className="relative flex-1 bg-surface overflow-auto p-8 select-none"
+      className="relative flex-1 bg-transparent overflow-y-auto overflow-x-hidden p-8 select-none"
     >
       {/* Drag & Drop Overlay */}
       {isDraggingOver && (
@@ -364,6 +364,7 @@ export function PageStack() {
             key={page.id}
             page={page}
             pageIndex={index}
+            totalPages={pages.length}
             jobId={activeJob.id}
             jobSettings={activeJob.settings}
             zoom={zoom}

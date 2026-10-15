@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { nanoid } from 'nanoid';
+import { Check, ArrowRight, Plus } from 'lucide-react';
 import { useSessionStore } from '@/store/useSessionStore';
 import { useUiStore, MultiImportCard } from '@/store/useUiStore';
 import { ModalShell } from './ModalShell';
@@ -12,12 +13,23 @@ export function ArrangeModal() {
   const setMultiImport = useUiStore((s) => s.setMultiImport);
   const discardAssets = useSessionStore((s) => s.discardAssets);
   const assets = useSessionStore((s) => s.assets);
+  const jobs = useSessionStore((s) => s.jobs);
+  const activeJobId = useSessionStore((s) => s.activeJobId);
 
   const [activeMenuAssetId, setActiveMenuAssetId] = useState<string | null>(null);
   const [dragOverCardId, setDragOverCardId] = useState<string | null>(null);
   const [limitNotice, setLimitNotice] = useState<string | null>(null);
 
   const menuRef = useRef<HTMLDivElement>(null);
+
+  const activeJob = useMemo(() => {
+    return jobs.find((j) => j.id === activeJobId) || jobs[0];
+  }, [jobs, activeJobId]);
+
+  const templatePage = activeJob?.pages[0];
+  const paperName = templatePage?.paperId
+    ? templatePage.paperId.charAt(0).toUpperCase() + templatePage.paperId.slice(1)
+    : 'Letter';
 
   const assetMap = useMemo(() => {
     return new Map(assets.map((a) => [a.id, a]));
@@ -42,6 +54,13 @@ export function ArrangeModal() {
   }
 
   const { cards, batchAssetIds, chosenLayouts } = multiImport;
+
+  const isEachOnOwnPage =
+    cards.length === batchAssetIds.length &&
+    cards.every((c) => c.assetIds.length === 1);
+  const isAllOnOnePage =
+    cards.length === Math.ceil(batchAssetIds.length / 12) &&
+    cards[0]?.assetIds.length > 1;
 
   const handleCancel = () => {
     discardAssets(batchAssetIds);
@@ -106,11 +125,12 @@ export function ArrangeModal() {
     if (!targetCard) return;
 
     if (targetCard.assetIds.length >= 12) {
-      setLimitNotice('A page holds up to 12 pictures');
+      setLimitNotice('A page can hold at most 12 pictures.');
       return;
     }
 
     setLimitNotice(null);
+
     const updatedCards: MultiImportCard[] = [];
     for (const card of cards) {
       if (card.id === fromCardId) {
@@ -119,31 +139,36 @@ export function ArrangeModal() {
           updatedCards.push({ ...card, assetIds: remaining });
         }
       } else if (card.id === targetCardIdOrNew) {
-        const nextAssetIds = [...card.assetIds, assetId].sort(
-          (a, b) => batchAssetIds.indexOf(a) - batchAssetIds.indexOf(b)
-        );
-        updatedCards.push({ ...card, assetIds: nextAssetIds });
+        updatedCards.push({
+          ...card,
+          assetIds: [...card.assetIds, assetId],
+        });
       } else {
         updatedCards.push(card);
       }
     }
 
-    setMultiImport((prev) => (prev ? { ...prev, cards: updatedCards } : null));
+    setMultiImport((prev) =>
+      prev ? { ...prev, cards: updatedCards } : null
+    );
   };
 
   const handleAddNewPage = () => {
-    const newCard: MultiImportCard = {
-      id: nanoid(),
-      assetIds: [],
-    };
+    setLimitNotice(null);
     setMultiImport((prev) =>
-      prev ? { ...prev, cards: [...prev.cards, newCard] } : null
+      prev
+        ? {
+            ...prev,
+            cards: [...prev.cards, { id: nanoid(), assetIds: [] }],
+          }
+        : null
     );
   };
 
   const handleContinue = () => {
-    const pagesNeedingLayout = cards.filter((c) => c.assetIds.length >= 2);
-    if (pagesNeedingLayout.length === 0) {
+    const pagesWithMultiple = cards.filter((c) => c.assetIds.length >= 2);
+
+    if (pagesWithMultiple.length === 0) {
       finishMultiImport(cards, chosenLayouts, batchAssetIds);
     } else {
       setMultiImport((prev) =>
@@ -161,40 +186,85 @@ export function ArrangeModal() {
   return (
     <ModalShell titleId="arrange-modal-title" onCancel={handleCancel}>
       {/* Header */}
-      <div className="mb-4">
-        <h2
-          id="arrange-modal-title"
-          className="text-[20px] font-semibold text-ink leading-tight"
-        >
-          Arrange your pictures
-        </h2>
-        <p className="text-[14px] text-muted mt-1">
-          Drag a picture to move it to another page.
-        </p>
+      <div className="flex items-start justify-between gap-4 mb-5 shrink-0">
+        <div>
+          <h2
+            id="arrange-modal-title"
+            className="font-heading font-extrabold text-[34px] tracking-[-0.02em] leading-tight text-ink"
+          >
+            Arrange your{' '}
+            <span className="font-accent italic text-[40px] text-red font-normal">
+              pictures
+            </span>
+          </h2>
+          <p className="text-[15px] text-muted mt-1">
+            {batchAssetIds.length} pictures · {paperName}
+          </p>
+        </div>
       </div>
 
-      {/* Quick Buttons & Limit Notice */}
-      <div className="flex items-center justify-between gap-3 mb-4">
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={handleEachOnOwnPage}
-            className="h-[44px] px-4 rounded-[8px] border border-line bg-paper text-ink hover:border-blue hover:text-blue transition-colors text-[14px] font-medium cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue"
-          >
+      {/* Two choices as big selectable cards */}
+      <div className="grid grid-cols-2 gap-4 mb-4 shrink-0">
+        {/* Choice A: Each on its own page */}
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={handleEachOnOwnPage}
+          className={`rounded-[22px] p-4 pb-[18px] border-2 bg-surface2 flex flex-col cursor-pointer transition-all relative select-none ${
+            isEachOnOwnPage
+              ? 'border-blue bg-blue-tint'
+              : 'border-line hover:border-line2'
+          }`}
+        >
+          {isEachOnOwnPage && (
+            <div
+              aria-label="Selected"
+              className="absolute top-3 right-3 w-[26px] h-[26px] rounded-full bg-blue text-white flex items-center justify-center shadow-xs"
+            >
+              <Check className="w-4 h-4 stroke-[2.5]" />
+            </div>
+          )}
+          <span className="font-heading font-extrabold text-[18px] text-ink">
             Each on its own page
-          </button>
-          <button
-            type="button"
-            onClick={handleAllOnOnePage}
-            className="h-[44px] px-4 rounded-[8px] border border-line bg-paper text-ink hover:border-blue hover:text-blue transition-colors text-[14px] font-medium cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue"
-          >
-            All on 1 page
-          </button>
+          </span>
+          <span className="text-[13px] text-muted mt-0.5">
+            One picture per sheet
+          </span>
         </div>
-        {limitNotice && (
-          <p className="text-[14px] text-muted font-medium">{limitNotice}</p>
-        )}
+
+        {/* Choice B: All on 1 page */}
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={handleAllOnOnePage}
+          className={`rounded-[22px] p-4 pb-[18px] border-2 bg-surface2 flex flex-col cursor-pointer transition-all relative select-none ${
+            isAllOnOnePage
+              ? 'border-blue bg-blue-tint'
+              : 'border-line hover:border-line2'
+          }`}
+        >
+          {isAllOnOnePage && (
+            <div
+              aria-label="Selected"
+              className="absolute top-3 right-3 w-[26px] h-[26px] rounded-full bg-blue text-white flex items-center justify-center shadow-xs"
+            >
+              <Check className="w-4 h-4 stroke-[2.5]" />
+            </div>
+          )}
+          <span className="font-heading font-extrabold text-[18px] text-ink">
+            All on 1 page
+          </span>
+          <span className="text-[13px] text-muted mt-0.5">
+            Put pictures together on a sheet
+          </span>
+        </div>
       </div>
+
+      {limitNotice && (
+        <p className="text-[14px] text-yellow font-medium mb-3 shrink-0">
+          {limitNotice}
+        </p>
+      )}
 
       {/* Body: Horizontal Scrollable Row of Page Cards */}
       <div className="flex-1 overflow-x-auto overflow-y-hidden py-2 flex gap-4 items-start min-h-[220px]">
@@ -232,17 +302,23 @@ export function ArrangeModal() {
                   // Ignore invalid drag data
                 }
               }}
-              className={`w-[220px] min-w-[220px] bg-surface rounded-[12px] border p-3 flex flex-col transition-all ${
+              className={`w-[240px] min-w-[240px] bg-surface2 rounded-[16px] border-[1.5px] p-3 flex flex-col gap-2 transition-all shrink-0 ${
                 isDragTarget
-                  ? 'border-2 border-dashed border-blue bg-blue/5'
+                  ? 'border-2 border-dashed border-blue bg-blue-tint'
                   : 'border-line'
               }`}
             >
-              <div className="text-[14px] font-medium text-ink mb-2 select-none">
-                Page {pageIndex + 1}
+              <div className="flex items-center justify-between select-none">
+                <span className="text-sm font-bold text-ink">
+                  Page {pageIndex + 1}
+                </span>
+                <span className="text-xs text-muted">
+                  {card.assetIds.length}{' '}
+                  {card.assetIds.length === 1 ? 'picture' : 'pictures'}
+                </span>
               </div>
 
-              <div className="bg-paper border border-line rounded-[8px] p-2 min-h-[140px] flex flex-wrap gap-2 content-start">
+              <div className="bg-surface border border-line rounded-[12px] p-2 min-h-[140px] flex flex-wrap gap-2 content-start">
                 {card.assetIds.map((assetId) => {
                   const asset = assetMap.get(assetId);
                   if (!asset) return null;
@@ -276,7 +352,7 @@ export function ArrangeModal() {
                       aria-haspopup="menu"
                       aria-expanded={isMenuOpen}
                       aria-label={`Picture: ${asset.name}. Press Enter to move.`}
-                      className="w-[80px] h-[80px] rounded-[6px] border border-line hover:border-blue overflow-hidden relative cursor-grab active:cursor-grabbing transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue"
+                      className="w-[62px] h-[62px] rounded-[14px] border border-line hover:border-blue overflow-hidden relative cursor-grab active:cursor-grabbing transition-colors shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue"
                     >
                       <img
                         src={asset.objectUrl}
@@ -292,9 +368,9 @@ export function ArrangeModal() {
                           role="menu"
                           aria-label="Move to page"
                           onClick={(e) => e.stopPropagation()}
-                          className="absolute top-0 left-0 z-40 bg-paper border border-line rounded-[8px] shadow-lg p-1.5 min-w-[120px] flex flex-col gap-1 text-left"
+                          className="absolute top-0 left-0 z-40 bg-surface border border-line rounded-[12px] shadow-lg p-1.5 min-w-[130px] flex flex-col gap-1 text-left"
                         >
-                          <span className="text-[12px] font-semibold text-muted px-2 py-1 select-none">
+                          <span className="text-[11px] font-bold uppercase tracking-wider text-faint px-2 py-1 select-none">
                             Move to
                           </span>
                           {cards.map((targetCard, tIdx) => {
@@ -314,7 +390,7 @@ export function ArrangeModal() {
                                     targetCard.id
                                   )
                                 }
-                                className="w-full text-left px-2 py-1 text-[13px] rounded-[4px] hover:bg-surface hover:text-blue disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-ink cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue"
+                                className="w-full text-left px-2 py-1.5 text-xs rounded-[6px] hover:bg-surface2 hover:text-blue disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-ink cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue"
                               >
                                 Page {tIdx + 1}
                               </button>
@@ -326,7 +402,7 @@ export function ArrangeModal() {
                             onClick={() =>
                               movePicture(assetId, card.id, 'new')
                             }
-                            className="w-full text-left px-2 py-1 text-[13px] rounded-[4px] border-t border-line text-blue hover:bg-surface font-medium cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue"
+                            className="w-full text-left px-2 py-1.5 text-xs rounded-[6px] border-t border-line text-blue hover:bg-surface2 font-bold cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue"
                           >
                             New page
                           </button>
@@ -377,32 +453,41 @@ export function ArrangeModal() {
               // Ignore invalid drag data
             }
           }}
-          className={`w-[220px] min-w-[220px] min-h-[196px] rounded-[12px] border-2 border-dashed flex flex-col items-center justify-center text-[14px] font-medium text-muted hover:text-blue hover:border-blue cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue ${
+          className={`w-[240px] min-w-[240px] min-h-[196px] rounded-[16px] border-[1.5px] border-dashed flex flex-col items-center justify-center gap-2 text-sm font-bold text-muted hover:text-blue hover:border-blue cursor-pointer transition-colors shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue ${
             dragOverCardId === 'new-card-drop'
-              ? 'border-blue bg-blue/5 text-blue'
-              : 'border-line bg-surface/30'
+              ? 'border-blue bg-blue-tint text-blue'
+              : 'border-line bg-surface2/50'
           }`}
         >
-          + New page
+          <Plus className="w-5 h-5" />
+          <span>+ New page</span>
         </div>
       </div>
 
       {/* Footer */}
-      <div className="mt-6 pt-4 border-t border-line flex items-center justify-end gap-3">
-        <button
-          type="button"
-          onClick={handleCancel}
-          className="h-[40px] px-5 rounded-[8px] border border-line bg-paper text-ink hover:border-blue hover:text-blue transition-colors text-[14px] font-medium cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue"
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          onClick={handleContinue}
-          className="h-[40px] px-6 rounded-[8px] bg-blue-strong text-white hover:bg-blue-strong/90 transition-colors text-[14px] font-medium cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue"
-        >
-          Continue
-        </button>
+      <div className="mt-6 pt-5 border-t border-line flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-2 text-[14px] text-muted select-none">
+          <Check className="w-4 h-4 text-green stroke-[2.5]" />
+          <span>Nothing is cropped or stretched</span>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={handleCancel}
+            className="h-[48px] px-6 rounded-[14px] border-[1.5px] border-line2 bg-transparent text-ink font-bold text-[16px] hover:border-blue hover:text-blue transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleContinue}
+            className="h-[48px] px-7 rounded-[14px] bg-red text-on-red font-bold text-[16px] flex items-center gap-2 hover:opacity-90 shadow-[0_8px_24px_-6px_rgba(244,112,103,0.55)] transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue"
+          >
+            <span>Continue</span>
+            <ArrowRight className="w-5 h-5" />
+          </button>
+        </div>
       </div>
     </ModalShell>
   );

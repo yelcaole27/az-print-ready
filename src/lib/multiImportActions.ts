@@ -58,10 +58,5 @@ export function finishMultiImport(
     uiStore.setActiveAssetId(batchAssetIds[batchAssetIds.length - 1]);
   }
 
-  uiStore.setMessage({
-    type: 'info',
-    text: `Ready. ${cards.length} page(s)`,
-  });
-
   uiStore.setMultiImport(null);
 }

@@ -161,7 +161,7 @@ export function generateBlockPages(block: Block, ctx: BlockCtx): Page[] {
 
       if (!fitsNormal && !fitsRotated) {
         useUiStore.getState().setMessage({
-          type: 'info',
+          type: 'warn',
           text: "Some sizes don't fit this paper",
         });
         continue;

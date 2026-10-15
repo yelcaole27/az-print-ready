@@ -25,6 +25,17 @@ export interface MultiImportState {
   chosenLayouts: Record<string, 'best' | 'grid' | 'column' | 'row'>;
 }
 
+export interface ConfirmModalState {
+  title: string;
+  accentWord?: string;
+  message?: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  destructive?: boolean;
+  onConfirm: () => void;
+  onCancel?: () => void;
+}
+
 interface UiState {
   zoom: number;
   zoomMode: ZoomMode;
@@ -74,11 +85,16 @@ interface UiState {
   // Settings Modal
   isSettingsOpen: boolean;
 
+  // Confirm Modal
+  confirmModal: ConfirmModalState | null;
+
   // Inline Message Banner
   message: UiMessage | null;
 
   setEditingBlockLayoutId: (id: string | null) => void;
   setSettingsOpen: (open: boolean) => void;
+  openConfirmModal: (conf: ConfirmModalState) => void;
+  closeConfirmModal: () => void;
 
   setMultiImport: (
     val:
@@ -153,7 +169,7 @@ function setupSystemThemeListener(active: boolean) {
 }
 
 function getStoredTheme(): AppTheme {
-  if (typeof window === 'undefined') return 'system';
+  if (typeof window === 'undefined') return 'dark';
   try {
     const stored = localStorage.getItem('azpr-theme');
     if (stored === 'light' || stored === 'dark' || stored === 'system') {
@@ -162,7 +178,7 @@ function getStoredTheme(): AppTheme {
   } catch {
     // Ignore storage errors
   }
-  return 'system';
+  return 'dark';
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -170,7 +186,7 @@ export const useUiStore = create<UiState>((set) => ({
   zoomMode: 'fit-page',
   showMargins: true,
   activePageId: null,
-  theme: 'system',
+  theme: 'dark',
   sidebarCollapsed: false,
 
   activeAssetId: null,
@@ -199,6 +215,7 @@ export const useUiStore = create<UiState>((set) => ({
   multiImport: null,
   editingBlockLayoutId: null,
   isSettingsOpen: false,
+  confirmModal: null,
 
   message: null,
 
@@ -208,6 +225,14 @@ export const useUiStore = create<UiState>((set) => ({
 
   setSettingsOpen: (open: boolean) => {
     set({ isSettingsOpen: open });
+  },
+
+  openConfirmModal: (conf: ConfirmModalState) => {
+    set({ confirmModal: conf });
+  },
+
+  closeConfirmModal: () => {
+    set({ confirmModal: null });
   },
 
   setZoom: (zoom: number) => {

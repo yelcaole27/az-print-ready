@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useMemo, useEffect } from 'react';
+import { Check, ArrowRight } from 'lucide-react';
 import { useSessionStore } from '@/store/useSessionStore';
 import { useUiStore } from '@/store/useUiStore';
 import { ModalShell } from './ModalShell';
@@ -174,33 +175,55 @@ export function LayoutModal() {
     );
   };
 
-  // Mini preview dimensions: 200px wide
-  const previewW = 200;
-  const previewH = Math.round(previewW * (pageHMm / pageWMm));
-  const scale = previewW / pageWMm;
+  // Mini preview dimensions: 176x228
+  const previewW = 176;
+  const previewH = 228;
+  const scaleX = previewW / pageWMm;
+  const scaleY = previewH / pageHMm;
+
+  const paperName = templatePage?.paperId
+    ? templatePage.paperId.charAt(0).toUpperCase() + templatePage.paperId.slice(1)
+    : 'Letter';
+
+  const OPTION_HINTS: Record<string, string> = {
+    best: 'Biggest pictures',
+    grid: 'Even boxes',
+    column: 'Stacked',
+    row: 'Side by side',
+  };
 
   return (
     <ModalShell titleId="layout-modal-title" onCancel={handleCancel}>
       {/* Header */}
-      <div className="mb-6">
-        <h2
-          id="layout-modal-title"
-          className="text-[20px] font-semibold text-ink leading-tight"
-        >
-          Choose a layout
-        </h2>
-        {totalSteps > 1 && (
-          <p className="text-[14px] text-muted mt-1">
-            Page {originalPageNumber} · {currentStep + 1} of {totalSteps}
+      <div className="flex items-start justify-between gap-4 mb-6 shrink-0">
+        <div>
+          <h2
+            id="layout-modal-title"
+            className="font-heading font-extrabold text-[34px] tracking-[-0.02em] leading-tight text-ink"
+          >
+            Choose a{' '}
+            <span className="font-accent italic text-[40px] text-red font-normal">
+              layout
+            </span>
+          </h2>
+          <p className="text-[15px] text-muted mt-1">
+            {currentCard.assetIds.length} pictures · {paperName}
           </p>
+        </div>
+
+        {totalSteps > 1 && (
+          <div className="px-3.5 py-1.5 rounded-full bg-surface2 border border-line text-[13.5px] font-bold text-ink shrink-0">
+            Page {currentStep + 1} of {totalSteps}
+          </div>
         )}
       </div>
 
-      {/* Body: Grid of option cards (up to 4, 2 per row) */}
-      <div className="flex-1 overflow-y-auto py-2 flex items-center justify-center min-h-[300px]">
-        <div className="grid grid-cols-2 gap-6 max-w-[500px]">
+      {/* Body: 4 option cards in a row, wrapping on narrow screens */}
+      <div className="flex-1 overflow-y-auto py-2 flex items-center justify-center">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 w-full">
           {options.map((option) => {
             const isSelected = option.id === chosenOptionId;
+            const hint = OPTION_HINTS[option.id] || '';
 
             return (
               <div
@@ -208,36 +231,26 @@ export function LayoutModal() {
                 role="button"
                 tabIndex={0}
                 onClick={() => handleSelectOption(option.id)}
-                className={`p-3 rounded-[12px] bg-surface flex flex-col items-center cursor-pointer transition-all relative ${
+                className={`rounded-[22px] p-4 pb-[18px] border-2 bg-surface2 flex flex-col items-center cursor-pointer transition-all relative select-none ${
                   isSelected
-                    ? 'border-2 border-blue shadow-sm'
-                    : 'border border-line hover:border-blue'
+                    ? 'border-blue bg-blue-tint'
+                    : 'border-line hover:border-line2'
                 }`}
               >
-                {/* Check badge when selected */}
+                {/* 26px blue circle check badge when selected */}
                 {isSelected && (
                   <div
                     aria-label="Selected"
-                    className="absolute top-2 right-2 w-5 h-5 rounded-full bg-blue text-white flex items-center justify-center text-xs"
+                    className="absolute top-3 right-3 w-[26px] h-[26px] rounded-full bg-blue text-white flex items-center justify-center shadow-xs"
                   >
-                    <svg
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                      className="w-3.5 h-3.5"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
+                    <Check className="w-4 h-4 stroke-[2.5]" />
                   </div>
                 )}
 
-                {/* Mini paper preview */}
+                {/* Mini Letter paper preview (176x228, #FBFAF6, soft shadow) */}
                 <div
                   style={{ width: `${previewW}px`, height: `${previewH}px` }}
-                  className="relative bg-white border border-line rounded-[2px] shadow-xs overflow-hidden"
+                  className="relative bg-[#FBFAF6] border border-line rounded-[4px] shadow-sm overflow-hidden shrink-0"
                 >
                   {option.items.map((placed, pIdx) => {
                     const asset = assetMap.get(placed.assetId);
@@ -248,31 +261,29 @@ export function LayoutModal() {
                         key={placed.assetId + pIdx}
                         style={{
                           position: 'absolute',
-                          left: `${placed.xMm * scale}px`,
-                          top: `${placed.yMm * scale}px`,
-                          width: `${placed.wMm * scale}px`,
-                          height: `${placed.hMm * scale}px`,
+                          left: `${placed.xMm * scaleX}px`,
+                          top: `${placed.yMm * scaleY}px`,
+                          width: `${placed.wMm * scaleX}px`,
+                          height: `${placed.hMm * scaleY}px`,
                         }}
                       >
                         <img
                           src={asset.objectUrl}
                           alt=""
                           draggable={false}
-                          style={{
-                            width: '100%',
-                            height: '100%',
-                            objectFit: 'fill',
-                          }}
-                          className="block select-none pointer-events-none"
+                          className="w-full h-full object-cover block select-none pointer-events-none"
                         />
                       </div>
                     );
                   })}
                 </div>
 
-                {/* Option label */}
-                <span className="text-[14px] font-medium text-ink mt-2.5 select-none">
+                {/* Option Name & Hint */}
+                <span className="font-heading font-extrabold text-[18px] text-ink mt-3.5 text-center leading-tight">
                   {option.label}
+                </span>
+                <span className="text-[13px] text-muted mt-0.5 text-center leading-tight">
+                  {hint}
                 </span>
               </div>
             );
@@ -281,29 +292,27 @@ export function LayoutModal() {
       </div>
 
       {/* Footer */}
-      <div className="mt-6 pt-4 border-t border-line flex items-center justify-between">
-        <button
-          type="button"
-          onClick={handleBack}
-          className="h-[40px] px-5 rounded-[8px] border border-line bg-paper text-ink hover:border-blue hover:text-blue transition-colors text-[14px] font-medium cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue"
-        >
-          Back
-        </button>
+      <div className="mt-6 pt-5 border-t border-line flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-2 text-[14px] text-muted select-none">
+          <Check className="w-4 h-4 text-green stroke-[2.5]" />
+          <span>Nothing is cropped or stretched</span>
+        </div>
 
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={handleCancel}
-            className="h-[40px] px-5 rounded-[8px] border border-line bg-paper text-ink hover:border-blue hover:text-blue transition-colors text-[14px] font-medium cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue"
+            onClick={handleBack}
+            className="h-[48px] px-6 rounded-[14px] border-[1.5px] border-line2 bg-transparent text-ink font-bold text-[16px] hover:border-blue hover:text-blue transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue"
           >
-            Cancel
+            Back
           </button>
           <button
             type="button"
             onClick={handleNextOrDone}
-            className="h-[40px] px-6 rounded-[8px] bg-blue-strong text-white hover:bg-blue-strong/90 transition-colors text-[14px] font-medium cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue"
+            className="h-[48px] px-7 rounded-[14px] bg-red text-on-red font-bold text-[16px] flex items-center gap-2 hover:opacity-90 shadow-[0_8px_24px_-6px_rgba(244,112,103,0.55)] transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue"
           >
-            {currentStep < totalSteps - 1 ? 'Next' : 'Done'}
+            <span>{currentStep < totalSteps - 1 ? 'Next' : 'Done'}</span>
+            <ArrowRight className="w-5 h-5" />
           </button>
         </div>
       </div>

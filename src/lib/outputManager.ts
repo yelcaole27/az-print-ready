@@ -27,6 +27,9 @@ export function getOutputPageIndexes(): {
 }
 
 export function requestPrint(): void {
+  // Dismiss any open toast before print
+  useUiStore.getState().setMessage(null);
+
   const outputData = getOutputPageIndexes();
   if (!outputData || outputData.pageIndexes.length === 0) return;
 
@@ -99,11 +102,12 @@ export function cancelExportPdf(): void {
 }
 
 export function confirmNotice(): void {
-  const { checkNotice, setCheckNotice } = useUiStore.getState();
+  const { checkNotice, setCheckNotice, setMessage } = useUiStore.getState();
   if (!checkNotice) return;
 
   const action = checkNotice.action;
   setCheckNotice(null);
+  setMessage(null);
 
   if (action === 'print') {
     executePrint();

@@ -6,7 +6,10 @@ export async function executePrint(): Promise<void> {
   if (isPrinting) return;
   isPrinting = true;
 
-  const { setOutputMode } = useUiStore.getState();
+  const { setOutputMode, setMessage } = useUiStore.getState();
+
+  // Close any open toast before print dialog opens
+  setMessage(null);
 
   // 1. Mount print root
   setOutputMode('print');

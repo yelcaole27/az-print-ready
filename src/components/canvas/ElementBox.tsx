@@ -999,9 +999,9 @@ export function ElementBox({
   }
 
   if (isSelected) {
-    borderClass = 'border-2 border-sheet-blue z-20';
+    borderClass = 'border-2 border-blue z-20';
   } else if (isHovered && !isLocked) {
-    borderClass = 'border border-sheet-blue/60 z-10';
+    borderClass = 'border border-blue/60 z-10';
   }
 
   const isGroupDraggingNow = Boolean(
@@ -1107,7 +1107,7 @@ export function ElementBox({
           </div>
         )}
 
-        {/* 8 Resize Handles (Only for selected, unlocked elements, not while editing or moving) */}
+        {/* 4 Corner Resize Handles (Only for selected, unlocked elements, not while editing or moving) */}
         {isSelected && !isPartOfMulti && !isLocked && !isEditing && !isMovingWithGhost && (
           <>
             {/* Top-Left */}
@@ -1115,56 +1115,28 @@ export function ElementBox({
               onPointerDown={(e) => handlePointerDownResize(e, 'nw')}
               onPointerMove={handlePointerMoveResize}
               onPointerUp={handlePointerUpResize}
-              className="absolute -top-[5px] -left-[5px] w-[10px] h-[10px] bg-sheet border-[1.5px] border-sheet-blue cursor-nwse-resize z-40 box-border"
-            />
-            {/* Top-Center */}
-            <div
-              onPointerDown={(e) => handlePointerDownResize(e, 'n')}
-              onPointerMove={handlePointerMoveResize}
-              onPointerUp={handlePointerUpResize}
-              className="absolute -top-[5px] left-1/2 -translate-x-1/2 w-[10px] h-[10px] bg-sheet border-[1.5px] border-sheet-blue cursor-ns-resize z-40 box-border"
+              className="absolute -top-[4.5px] -left-[4.5px] w-[9px] h-[9px] bg-white border border-blue cursor-nwse-resize z-40 box-border"
             />
             {/* Top-Right */}
             <div
               onPointerDown={(e) => handlePointerDownResize(e, 'ne')}
               onPointerMove={handlePointerMoveResize}
               onPointerUp={handlePointerUpResize}
-              className="absolute -top-[5px] -right-[5px] w-[10px] h-[10px] bg-sheet border-[1.5px] border-sheet-blue cursor-nesw-resize z-40 box-border"
-            />
-            {/* Middle-Right */}
-            <div
-              onPointerDown={(e) => handlePointerDownResize(e, 'e')}
-              onPointerMove={handlePointerMoveResize}
-              onPointerUp={handlePointerUpResize}
-              className="absolute top-1/2 -right-[5px] -translate-y-1/2 w-[10px] h-[10px] bg-sheet border-[1.5px] border-sheet-blue cursor-ew-resize z-40 box-border"
+              className="absolute -top-[4.5px] -right-[4.5px] w-[9px] h-[9px] bg-white border border-blue cursor-nesw-resize z-40 box-border"
             />
             {/* Bottom-Right */}
             <div
               onPointerDown={(e) => handlePointerDownResize(e, 'se')}
               onPointerMove={handlePointerMoveResize}
               onPointerUp={handlePointerUpResize}
-              className="absolute -bottom-[5px] -right-[5px] w-[10px] h-[10px] bg-sheet border-[1.5px] border-sheet-blue cursor-nwse-resize z-40 box-border"
-            />
-            {/* Bottom-Center */}
-            <div
-              onPointerDown={(e) => handlePointerDownResize(e, 's')}
-              onPointerMove={handlePointerMoveResize}
-              onPointerUp={handlePointerUpResize}
-              className="absolute -bottom-[5px] left-1/2 -translate-x-1/2 w-[10px] h-[10px] bg-sheet border-[1.5px] border-sheet-blue cursor-ns-resize z-40 box-border"
+              className="absolute -bottom-[4.5px] -right-[4.5px] w-[9px] h-[9px] bg-white border border-blue cursor-nwse-resize z-40 box-border"
             />
             {/* Bottom-Left */}
             <div
               onPointerDown={(e) => handlePointerDownResize(e, 'sw')}
               onPointerMove={handlePointerMoveResize}
               onPointerUp={handlePointerUpResize}
-              className="absolute -bottom-[5px] -left-[5px] w-[10px] h-[10px] bg-sheet border-[1.5px] border-sheet-blue cursor-nesw-resize z-40 box-border"
-            />
-            {/* Middle-Left */}
-            <div
-              onPointerDown={(e) => handlePointerDownResize(e, 'w')}
-              onPointerMove={handlePointerMoveResize}
-              onPointerUp={handlePointerUpResize}
-              className="absolute top-1/2 -left-[5px] -translate-y-1/2 w-[10px] h-[10px] bg-sheet border-[1.5px] border-sheet-blue cursor-ew-resize z-40 box-border"
+              className="absolute -bottom-[4.5px] -left-[4.5px] w-[9px] h-[9px] bg-white border border-blue cursor-nesw-resize z-40 box-border"
             />
           </>
         )}

@@ -15,6 +15,7 @@ export function SettingsModal() {
   const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
   const activePageId = useUiStore((s) => s.activePageId);
   const clearSelection = useUiStore((s) => s.clearSelection);
+  const openConfirmModal = useUiStore((s) => s.openConfirmModal);
 
   const jobs = useSessionStore((s) => s.jobs);
   const activeJobId = useSessionStore((s) => s.activeJobId);
@@ -57,11 +58,21 @@ export function SettingsModal() {
       return;
     }
     if (hasManualEdits(activeJob.id)) {
-      const confirmed = window.confirm('Reset your manual changes?');
-      if (!confirmed) {
-        setMarginDraft(null);
-        return;
-      }
+      openConfirmModal({
+        title: 'Reset manual',
+        accentWord: 'changes?',
+        message: 'Changing space around will rearrange pictures on the page.',
+        confirmLabel: 'Reset and apply',
+        destructive: true,
+        onConfirm: () => {
+          setMarginDraft(null);
+          updateSettings(activeJob.id, { marginMm: mm });
+        },
+        onCancel: () => {
+          setMarginDraft(null);
+        },
+      });
+      return;
     }
     setMarginDraft(null);
     updateSettings(activeJob.id, { marginMm: mm });
@@ -80,14 +91,39 @@ export function SettingsModal() {
       return;
     }
     if (hasManualEdits(activeJob.id)) {
-      const confirmed = window.confirm('Reset your manual changes?');
-      if (!confirmed) {
-        setGapDraft(null);
-        return;
-      }
+      openConfirmModal({
+        title: 'Reset manual',
+        accentWord: 'changes?',
+        message: 'Changing space between will rearrange pictures on the page.',
+        confirmLabel: 'Reset and apply',
+        destructive: true,
+        onConfirm: () => {
+          setGapDraft(null);
+          updateSettings(activeJob.id, { gapMm: mm });
+        },
+        onCancel: () => {
+          setGapDraft(null);
+        },
+      });
+      return;
     }
     setGapDraft(null);
     updateSettings(activeJob.id, { gapMm: mm });
+  };
+
+  const handleStartOver = () => {
+    openConfirmModal({
+      title: 'Start',
+      accentWord: 'over?',
+      message: 'This will remove all pictures and text from this job.',
+      confirmLabel: 'Remove everything',
+      destructive: true,
+      onConfirm: () => {
+        clearElements(activeJob.id);
+        clearSelection();
+        onClose();
+      },
+    });
   };
 
   const activePage =
@@ -101,31 +137,42 @@ export function SettingsModal() {
     <ModalShell
       titleId="settings-modal-title"
       onCancel={onClose}
-      className="w-[min(520px,92vw)] max-h-[86vh] flex flex-col bg-paper rounded-[16px] p-6 shadow-2xl border border-line text-ink relative overflow-hidden focus:outline-none"
+      className="w-[min(580px,calc(100vw-48px))] max-h-[90vh] flex flex-col bg-surface rounded-[28px] px-[36px] pt-[32px] pb-[28px] border border-line2 text-ink shadow-[0_40px_100px_-20px_rgba(0,0,0,0.7)] relative overflow-hidden focus:outline-none"
     >
       {/* Header */}
-      <div className="flex items-center justify-between pb-4 border-b border-line shrink-0">
-        <h2 id="settings-modal-title" className="text-[20px] font-semibold text-ink leading-tight">
-          Settings
-        </h2>
+      <div className="flex items-start justify-between pb-5 border-b border-line shrink-0">
+        <div className="flex flex-col gap-1">
+          <h2
+            id="settings-modal-title"
+            className="font-heading font-extrabold text-[34px] tracking-[-0.02em] text-ink leading-tight"
+          >
+            Project{' '}
+            <span className="font-accent italic text-[40px] text-red font-normal">
+              settings
+            </span>
+          </h2>
+          <p className="text-[15px] text-muted">
+            Margins, spacing, units, and page tools.
+          </p>
+        </div>
         <button
           type="button"
           onClick={onClose}
           aria-label="Close settings"
-          className="w-10 h-10 flex items-center justify-center rounded-[8px] text-muted hover:text-ink hover:bg-surface transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue"
+          className="w-10 h-10 flex items-center justify-center rounded-[12px] text-muted hover:text-ink hover:bg-surface2 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue"
         >
           <X className="w-5 h-5" />
         </button>
       </div>
 
       {/* Body: Scrollable sections */}
-      <div className="flex-1 overflow-y-auto py-4 flex flex-col gap-6 pr-1">
+      <div className="flex-1 overflow-y-auto py-5 flex flex-col gap-6 pr-1">
         {/* 1) Units */}
-        <section className="flex flex-col gap-2">
-          <h3 className="text-[12px] font-semibold text-muted uppercase tracking-wider">
+        <section className="flex flex-col">
+          <h3 className="text-[11.5px] font-bold uppercase tracking-[0.14em] text-faint mb-2.5">
             Units
           </h3>
-          <div className="grid grid-cols-3 p-1 rounded-[8px] bg-surface border border-line text-[14px] font-medium">
+          <div className="grid grid-cols-3 gap-2">
             {(['mm', 'cm', 'in'] as Unit[]).map((u) => {
               const isSelected = currentUnit === u;
               return (
@@ -133,10 +180,10 @@ export function SettingsModal() {
                   key={u}
                   type="button"
                   onClick={() => setUnit(u)}
-                  className={`h-[40px] flex items-center justify-center rounded-[6px] transition-colors cursor-pointer ${
+                  className={`h-[44px] flex items-center justify-center rounded-[14px] border-[1.5px] text-[14px] font-bold transition-all cursor-pointer ${
                     isSelected
-                      ? 'bg-paper text-ink shadow-xs font-semibold'
-                      : 'text-muted hover:text-ink'
+                      ? 'border-blue bg-blueTint text-blue'
+                      : 'border-line bg-surface2 text-muted hover:text-ink hover:border-line2'
                   } focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue`}
                 >
                   {u}
@@ -147,13 +194,13 @@ export function SettingsModal() {
         </section>
 
         {/* 2) Space */}
-        <section className="flex flex-col gap-2">
-          <h3 className="text-[12px] font-semibold text-muted uppercase tracking-wider">
+        <section className="flex flex-col">
+          <h3 className="text-[11.5px] font-bold uppercase tracking-[0.14em] text-faint mb-2.5">
             Space
           </h3>
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
-              <label className="text-[14px] font-medium text-ink">
+              <label className="text-[13px] font-medium text-muted">
                 Space around ({currentUnit})
               </label>
               <input
@@ -168,12 +215,12 @@ export function SettingsModal() {
                     e.currentTarget.blur();
                   }
                 }}
-                className="h-[40px] px-3 rounded-[8px] border border-line bg-surface text-ink text-[14px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue font-mono"
+                className="h-[44px] px-3.5 rounded-[14px] border-[1.5px] border-line bg-surface2 text-ink text-[15px] font-mono focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue"
               />
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <label className="text-[14px] font-medium text-ink">
+              <label className="text-[13px] font-medium text-muted">
                 Space between ({currentUnit})
               </label>
               <input
@@ -188,18 +235,18 @@ export function SettingsModal() {
                     e.currentTarget.blur();
                   }
                 }}
-                className="h-[40px] px-3 rounded-[8px] border border-line bg-surface text-ink text-[14px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue font-mono"
+                className="h-[44px] px-3.5 rounded-[14px] border-[1.5px] border-line bg-surface2 text-ink text-[15px] font-mono focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue"
               />
             </div>
           </div>
         </section>
 
         {/* 3) Cut lines */}
-        <section className="flex flex-col gap-2">
-          <h3 className="text-[12px] font-semibold text-muted uppercase tracking-wider">
+        <section className="flex flex-col">
+          <h3 className="text-[11.5px] font-bold uppercase tracking-[0.14em] text-faint mb-2.5">
             Cut lines
           </h3>
-          <div className="grid grid-cols-3 p-1 rounded-[8px] bg-surface border border-line text-[14px] font-medium">
+          <div className="grid grid-cols-3 gap-2">
             {[
               { style: 'none' as const, label: 'None' },
               { style: 'ticks' as const, label: 'Marks' },
@@ -211,10 +258,10 @@ export function SettingsModal() {
                   key={style}
                   type="button"
                   onClick={() => updateSettings(activeJob.id, { cutStyle: style })}
-                  className={`h-[40px] flex items-center justify-center rounded-[6px] transition-colors cursor-pointer ${
+                  className={`h-[44px] flex items-center justify-center rounded-[14px] border-[1.5px] text-[14px] font-bold transition-all cursor-pointer ${
                     isSelected
-                      ? 'bg-paper text-ink shadow-xs font-semibold'
-                      : 'text-muted hover:text-ink'
+                      ? 'border-blue bg-blueTint text-blue'
+                      : 'border-line bg-surface2 text-muted hover:text-ink hover:border-line2'
                   } focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue`}
                 >
                   {label}
@@ -224,7 +271,7 @@ export function SettingsModal() {
           </div>
 
           {cutWarning && (
-            <div className="flex items-start gap-2 text-[13px] text-muted mt-0.5">
+            <div className="flex items-start gap-2 text-[13px] text-muted mt-2">
               <span className="w-2 h-2 rounded-full bg-yellow shrink-0 mt-1" />
               <span>{cutWarning}</span>
             </div>
@@ -232,8 +279,8 @@ export function SettingsModal() {
         </section>
 
         {/* 4) Text */}
-        <section className="flex flex-col gap-2">
-          <h3 className="text-[12px] font-semibold text-muted uppercase tracking-wider">
+        <section className="flex flex-col">
+          <h3 className="text-[11.5px] font-bold uppercase tracking-[0.14em] text-faint mb-2.5">
             Text
           </h3>
           <div className="grid grid-cols-2 gap-3">
@@ -243,7 +290,7 @@ export function SettingsModal() {
                 addTextBox();
                 onClose();
               }}
-              className="h-[40px] px-4 rounded-[8px] border border-line bg-surface hover:bg-surface/80 text-ink text-[14px] font-medium transition-colors cursor-pointer flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue"
+              className="h-[44px] px-4 rounded-[14px] border-[1.5px] border-line bg-surface2 hover:bg-line/40 text-ink text-[14px] font-bold transition-colors cursor-pointer flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue"
             >
               <Type className="w-4 h-4" />
               <span>Add text box</span>
@@ -254,7 +301,7 @@ export function SettingsModal() {
                 newTextPage();
                 onClose();
               }}
-              className="h-[40px] px-4 rounded-[8px] border border-line bg-surface hover:bg-surface/80 text-ink text-[14px] font-medium transition-colors cursor-pointer flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue"
+              className="h-[44px] px-4 rounded-[14px] border-[1.5px] border-line bg-surface2 hover:bg-line/40 text-ink text-[14px] font-bold transition-colors cursor-pointer flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue"
             >
               <Type className="w-4 h-4" />
               <span>New text page</span>
@@ -263,25 +310,29 @@ export function SettingsModal() {
         </section>
 
         {/* 5) Start over */}
-        <section className="flex flex-col gap-2">
-          <h3 className="text-[12px] font-semibold text-muted uppercase tracking-wider">
+        <section className="flex flex-col">
+          <h3 className="text-[11.5px] font-bold uppercase tracking-[0.14em] text-faint mb-2.5">
             Start over
           </h3>
           <button
             type="button"
-            onClick={() => {
-              const confirmed = window.confirm('Remove everything in this job?');
-              if (confirmed) {
-                clearElements(activeJob.id);
-                clearSelection();
-                onClose();
-              }
-            }}
-            className="h-[40px] w-full flex items-center justify-center text-[14px] font-medium text-red border border-red/30 hover:bg-red/10 rounded-[8px] transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue"
+            onClick={handleStartOver}
+            className="h-[48px] w-full flex items-center justify-center text-[15px] font-bold text-red bg-red/10 border-[1.5px] border-red/30 hover:bg-red/20 rounded-[14px] transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue"
           >
-            Start over
+            Remove everything in this job
           </button>
         </section>
+      </div>
+
+      {/* Footer */}
+      <div className="pt-4 border-t border-line flex items-center justify-end shrink-0">
+        <button
+          type="button"
+          onClick={onClose}
+          className="h-[48px] px-8 rounded-[14px] border-[1.5px] border-line2 bg-surface2 hover:bg-line text-ink font-bold text-[16px] transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue"
+        >
+          Done
+        </button>
       </div>
     </ModalShell>
   );

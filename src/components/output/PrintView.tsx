@@ -16,11 +16,12 @@ export function PrintView({ job, pageIndexes, assetsById, assetSrcOverrides }: P
 
   return (
     <div id="print-root-container">
-      {pageIndexes.map((pageIdx) => {
+      {pageIndexes.map((pageIdx, idxInOutput) => {
         const page = pages[pageIdx];
         if (!page) return null;
 
         const { wMm, hMm } = getPageDimensionsMm(page);
+        const isLastPage = idxInOutput === pageIndexes.length - 1;
 
         return (
           <div
@@ -33,8 +34,13 @@ export function PrintView({ job, pageIndexes, assetsById, assetSrcOverrides }: P
               backgroundColor: '#FFFFFF',
               overflow: 'hidden',
               boxSizing: 'border-box',
-              pageBreakAfter: 'always',
-              breakAfter: 'page',
+              margin: 0,
+              padding: 0,
+              border: 'none',
+              boxShadow: 'none',
+              borderRadius: 0,
+              pageBreakAfter: isLastPage ? 'avoid' : 'always',
+              breakAfter: isLastPage ? 'avoid' : 'page',
             }}
           >
             {/* Cut Guides */}

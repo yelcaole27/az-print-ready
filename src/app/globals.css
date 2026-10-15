@@ -1,19 +1,35 @@
 @import "tailwindcss";
 
 @theme {
-  --color-ink: var(--color-ink);
-  --color-paper: var(--color-paper);
-  --color-surface: var(--color-surface);
-  --color-line: var(--color-line);
-  --color-muted: var(--color-muted);
-  --color-red: var(--color-red);
-  --color-blue: var(--color-blue);
-  --color-blue-strong: var(--color-blue-strong);
-  --color-green: var(--color-green);
-  --color-yellow: var(--color-yellow);
-  --color-bar: #000000;
+  --font-heading: var(--font-bricolage);
+  --font-body: var(--font-figtree);
+  --font-accent: var(--font-instrument-serif);
 
-  --color-sheet: #FFFFFF;
+  --color-bg: var(--color-bg);
+  --color-surface: var(--color-surface);
+  --color-surface2: var(--color-surface2);
+  --color-text: var(--color-text);
+  --color-muted: var(--color-muted);
+  --color-faint: var(--color-faint);
+  --color-line: var(--color-line);
+  --color-line2: var(--color-line2);
+  --color-red: var(--color-red);
+  --color-on-red: var(--color-on-red);
+  --color-blue: var(--color-blue);
+  --color-on-blue: var(--color-on-blue);
+  --color-blue-tint: var(--color-blue-tint);
+  --color-yellow: var(--color-yellow);
+  --color-green: var(--color-green);
+  --color-grid: var(--color-grid);
+  --color-glass: var(--color-glass);
+  --color-bar: var(--color-bar);
+
+  /* Legacy aliases for backward compatibility */
+  --color-ink: var(--color-text);
+  --color-paper: var(--color-surface);
+  --color-blue-strong: var(--color-blue);
+
+  --color-sheet: #FBFAF6;
   --color-sheet-ink: #111111;
   --color-sheet-blue: #1F5FBF;
   --color-sheet-muted: #6B6B6B;
@@ -21,40 +37,129 @@
 }
 
 :root {
-  color-scheme: light;
-  --color-ink: #111111;
-  --color-paper: #FFFFFF;
-  --color-surface: #F7F7F7;
-  --color-line: #E5E5E5;
-  --color-muted: #6B6B6B;
-  --color-red: #E8262B;
-  --color-blue: #1B9BF0;
-  --color-blue-strong: #0B72C9;
-  --color-green: #1DAA2F;
-  --color-yellow: #FFD500;
-  --color-bar: #000000;
-  --shadow-sheet: 0 1px 3px rgba(0, 0, 0, 0.12);
+  color-scheme: dark;
+  --color-bg: #0D0E12;
+  --color-surface: #171A21;
+  --color-surface2: #1F232C;
+  --color-text: #F3F0E9;
+  --color-muted: #A1A4AF;
+  --color-faint: #6E727E;
+  --color-line: rgba(255, 255, 255, 0.09);
+  --color-line2: rgba(255, 255, 255, 0.17);
+  --color-red: #F47067;
+  --color-on-red: #1E0B09;
+  --color-blue: #69B7F7;
+  --color-on-blue: #08141F;
+  --color-blue-tint: rgba(105, 183, 247, 0.14);
+  --color-yellow: #F5CF68;
+  --color-green: #6AD58C;
+  --color-grid: rgba(255, 255, 255, 0.04);
+  --color-glass: rgba(23, 26, 33, 0.8);
+  --color-bar: #08090C;
+  --shadow-sheet: 0 24px 60px -12px rgba(0,0,0,.65), 0 2px 8px rgba(0,0,0,.45);
 }
 
 [data-theme="dark"] {
   color-scheme: dark;
-  --color-ink: #F2F2F2;
-  --color-paper: #1A1A1B;
-  --color-surface: #0F0F10;
-  --color-line: #2E2E30;
-  --color-muted: #9A9A9F;
-  --color-red: #FF5A55;
-  --color-blue: #4DB3F5;
-  --color-blue-strong: #2F8FE0;
-  --color-green: #3CCB4F;
-  --color-yellow: #FFDD33;
-  --color-bar: #000000;
-  --shadow-sheet: 0 2px 8px rgba(0, 0, 0, 0.5);
+  --color-bg: #0D0E12;
+  --color-surface: #171A21;
+  --color-surface2: #1F232C;
+  --color-text: #F3F0E9;
+  --color-muted: #A1A4AF;
+  --color-faint: #6E727E;
+  --color-line: rgba(255, 255, 255, 0.09);
+  --color-line2: rgba(255, 255, 255, 0.17);
+  --color-red: #F47067;
+  --color-on-red: #1E0B09;
+  --color-blue: #69B7F7;
+  --color-on-blue: #08141F;
+  --color-blue-tint: rgba(105, 183, 247, 0.14);
+  --color-yellow: #F5CF68;
+  --color-green: #6AD58C;
+  --color-grid: rgba(255, 255, 255, 0.04);
+  --color-glass: rgba(23, 26, 33, 0.8);
+  --color-bar: #08090C;
+  --shadow-sheet: 0 24px 60px -12px rgba(0,0,0,.65), 0 2px 8px rgba(0,0,0,.45);
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --color-bg: #F3F0E8;
+  --color-surface: #FFFFFF;
+  --color-surface2: #F7F4EC;
+  --color-text: #17150F;
+  --color-muted: #615E54;
+  --color-faint: #8F8B7F;
+  --color-line: rgba(24, 20, 10, 0.10);
+  --color-line2: rgba(24, 20, 10, 0.20);
+  --color-red: #D63F38;
+  --color-on-red: #FFFFFF;
+  --color-blue: #2573C4;
+  --color-on-blue: #FFFFFF;
+  --color-blue-tint: rgba(37, 115, 196, 0.10);
+  --color-green: #2A9657;
+  --color-yellow: #C99A12;
+  --color-grid: rgba(24, 20, 10, 0.05);
+  --color-glass: rgba(255, 255, 255, 0.85);
+  --color-bar: #08090C;
+  --shadow-sheet: 0 22px 50px -14px rgba(60,45,20,.35), 0 2px 6px rgba(60,45,20,.18);
+}
+
+/* Text selection */
+::selection {
+  background-color: var(--color-blue-tint);
+  color: var(--color-text);
+}
+
+/* Universal 2px blue focus outline with 2px offset */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[role="button"]:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--color-blue) !important;
+  outline-offset: 2px !important;
+}
+
+/* Thin 8px scrollbars with line2 thumb and transparent track */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line2) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--color-line2);
+  border-radius: 4px;
+}
+
+/* Respect prefers-reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 body {
-  background-color: var(--color-surface);
-  color: var(--color-ink);
+  font-family: var(--font-figtree), sans-serif;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  background-image:
+    linear-gradient(to right, var(--color-grid) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--color-grid) 1px, transparent 1px);
+  background-size: 24px 24px;
   min-width: 1100px;
   overflow-x: auto;
 }
@@ -119,29 +224,74 @@ body {
     margin: 0 !important;
     padding: 0 !important;
     background: #FFFFFF !important;
+    background-image: none !important;
     min-width: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
     overflow: visible !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
 
-  /* Hide app shell and normal canvas during print */
-  #app-root {
+  /* General rule: hide everything on the page except #print-root and its contents */
+  body > *:not(#print-root) {
+    display: none !important;
+  }
+
+  #app-root,
+  .no-print,
+  [role="dialog"],
+  [role="status"],
+  [role="alert"],
+  [role="tooltip"] {
     display: none !important;
   }
 
   #print-root {
     display: block !important;
+    position: static !important;
+    visibility: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    line-height: 0 !important;
+    font-size: 0 !important;
+    background: transparent !important;
+  }
+
+  #print-root-container {
+    display: block !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    line-height: 0 !important;
+    font-size: 0 !important;
+    background: transparent !important;
   }
 
   .print-page {
+    display: block !important;
+    position: relative !important;
+    box-sizing: border-box !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    outline: none !important;
+    background-color: #FFFFFF !important;
+    overflow: hidden !important;
+    line-height: normal !important;
+    font-size: initial !important;
     page-break-after: always;
     break-after: page;
-    box-shadow: none !important;
   }
 
-  .no-print {
-    display: none !important;
+  .print-page:last-child {
+    page-break-after: avoid !important;
+    break-after: avoid !important;
   }
 }
 

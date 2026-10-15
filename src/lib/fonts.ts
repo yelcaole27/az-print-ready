@@ -1,4 +1,7 @@
 import {
+  Bricolage_Grotesque,
+  Figtree,
+  Instrument_Serif,
   Inter,
   Roboto,
   Open_Sans,
@@ -9,6 +12,28 @@ import {
   Oswald,
   Dancing_Script,
 } from 'next/font/google';
+
+export const bricolage = Bricolage_Grotesque({
+  weight: ['600', '800'],
+  subsets: ['latin'],
+  variable: '--font-bricolage',
+  display: 'swap',
+});
+
+export const figtree = Figtree({
+  weight: ['400', '500', '600', '700'],
+  subsets: ['latin'],
+  variable: '--font-figtree',
+  display: 'swap',
+});
+
+export const instrumentSerif = Instrument_Serif({
+  weight: '400',
+  style: 'italic',
+  subsets: ['latin'],
+  variable: '--font-instrument-serif',
+  display: 'swap',
+});
 
 export const inter = Inter({
   subsets: ['latin'],
@@ -67,6 +92,9 @@ export const dancingScript = Dancing_Script({
 });
 
 export const googleFontVariables = [
+  bricolage.variable,
+  figtree.variable,
+  instrumentSerif.variable,
   inter.variable,
   roboto.variable,
   openSans.variable,
@@ -91,6 +119,11 @@ export const FONT_OPTIONS: FontOption[] = [
   { name: 'Georgia', family: 'Georgia, Times, "Times New Roman", serif' },
   { name: 'Verdana', family: 'Verdana, Geneva, sans-serif' },
   { name: 'Courier New', family: '"Courier New", Courier, monospace' },
+
+  // Brand fonts
+  { name: 'Bricolage Grotesque', family: 'var(--font-bricolage), sans-serif' },
+  { name: 'Figtree', family: 'var(--font-figtree), sans-serif' },
+  { name: 'Instrument Serif', family: 'var(--font-instrument-serif), serif' },
 
   // Google fonts via CSS variables
   { name: 'Inter', family: 'var(--font-inter), sans-serif' },

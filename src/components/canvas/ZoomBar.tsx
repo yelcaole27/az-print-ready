@@ -34,7 +34,7 @@ export function ZoomBar({ onFitWidth, onFitPage }: ZoomBarProps) {
   };
 
   return (
-    <div className="absolute bottom-5 left-1/2 -translate-x-1/2 h-10 px-3 bg-paper border border-line rounded-[12px] shadow-sm flex items-center gap-2 select-none z-30 text-xs font-medium text-ink">
+    <div className="absolute bottom-6 left-1/2 -translate-x-1/2 h-11 px-2.5 bg-glass backdrop-blur-[14px] border border-line2 rounded-[18px] p-1.5 shadow-lg flex items-center gap-1.5 select-none z-30 text-xs font-medium text-text">
       {/* Zoom In/Out Stepper */}
       <div className="flex items-center gap-1">
         <button
@@ -43,12 +43,12 @@ export function ZoomBar({ onFitWidth, onFitPage }: ZoomBarProps) {
           disabled={zoom <= 0.25}
           title="Zoom out"
           aria-label="Zoom out"
-          className="w-7 h-7 flex items-center justify-center rounded-[6px] text-muted hover:text-ink hover:bg-surface disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
+          className="w-8 h-8 flex items-center justify-center rounded-[12px] text-muted hover:text-text hover:bg-surface2 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
         >
           <Minus className="w-3.5 h-3.5" />
         </button>
 
-        <span className="w-12 text-center text-xs font-mono tabular-nums text-ink">
+        <span className="w-12 text-center text-xs font-bold font-mono tabular-nums text-text">
           {zoomPercent}%
         </span>
 
@@ -58,13 +58,13 @@ export function ZoomBar({ onFitWidth, onFitPage }: ZoomBarProps) {
           disabled={zoom >= 4}
           title="Zoom in"
           aria-label="Zoom in"
-          className="w-7 h-7 flex items-center justify-center rounded-[6px] text-muted hover:text-ink hover:bg-surface disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
+          className="w-8 h-8 flex items-center justify-center rounded-[12px] text-muted hover:text-text hover:bg-surface2 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
         >
           <Plus className="w-3.5 h-3.5" />
         </button>
       </div>
 
-      <div className="w-[1px] h-4 bg-line mx-1" />
+      <div className="w-[1px] h-4 bg-line2 mx-1" />
 
       {/* Preset Modes */}
       <button
@@ -73,10 +73,10 @@ export function ZoomBar({ onFitWidth, onFitPage }: ZoomBarProps) {
           setZoomMode('fit-width');
           onFitWidth();
         }}
-        className={`h-7 px-2.5 rounded-[6px] cursor-pointer transition-colors ${
+        className={`h-8 px-3 rounded-[12px] cursor-pointer transition-colors text-xs font-semibold ${
           zoomMode === 'fit-width'
-            ? 'bg-surface text-blue font-semibold'
-            : 'text-muted hover:text-ink hover:bg-surface'
+            ? 'bg-blue-tint text-blue'
+            : 'text-muted hover:text-text hover:bg-surface2'
         }`}
       >
         Fit width
@@ -88,10 +88,10 @@ export function ZoomBar({ onFitWidth, onFitPage }: ZoomBarProps) {
           setZoomMode('fit-page');
           onFitPage();
         }}
-        className={`h-7 px-2.5 rounded-[6px] cursor-pointer transition-colors ${
+        className={`h-8 px-3 rounded-[12px] cursor-pointer transition-colors text-xs font-semibold ${
           zoomMode === 'fit-page'
-            ? 'bg-surface text-blue font-semibold'
-            : 'text-muted hover:text-ink hover:bg-surface'
+            ? 'bg-blue-tint text-blue'
+            : 'text-muted hover:text-text hover:bg-surface2'
         }`}
       >
         Fit page
@@ -100,25 +100,25 @@ export function ZoomBar({ onFitWidth, onFitPage }: ZoomBarProps) {
       <button
         type="button"
         onClick={handle100Percent}
-        className={`h-7 px-2.5 rounded-[6px] cursor-pointer transition-colors ${
+        className={`h-8 px-3 rounded-[12px] cursor-pointer transition-colors text-xs font-semibold ${
           zoomPercent === 100 && zoomMode === 'custom'
-            ? 'bg-surface text-blue font-semibold'
-            : 'text-muted hover:text-ink hover:bg-surface'
+            ? 'bg-blue-tint text-blue'
+            : 'text-muted hover:text-text hover:bg-surface2'
         }`}
       >
         100%
       </button>
 
-      <div className="w-[1px] h-4 bg-line mx-1" />
+      <div className="w-[1px] h-4 bg-line2 mx-1" />
 
       {/* Margins Toggle */}
       <button
         type="button"
         onClick={toggleMargins}
-        className={`h-7 px-2.5 rounded-[6px] cursor-pointer transition-colors ${
+        className={`h-8 px-3 rounded-[12px] cursor-pointer transition-colors text-xs font-semibold ${
           showMargins
-            ? 'bg-surface text-blue font-semibold'
-            : 'text-muted hover:text-ink hover:bg-surface'
+            ? 'bg-blue-tint text-blue'
+            : 'text-muted hover:text-text hover:bg-surface2'
         }`}
       >
         Margins

@@ -14,11 +14,21 @@ import { newTextPage } from '@/lib/textActions';
 import { PrintView } from '@/components/output/PrintView';
 import { CheckNotice } from '@/components/output/CheckNotice';
 import { ExportProgress } from '@/components/output/ExportProgress';
-import { requestPrint, confirmNotice, cancelExportPdf } from '@/lib/outputManager';
+import { requestPrint, requestExportPdf, startExportPdf, confirmNotice, cancelExportPdf } from '@/lib/outputManager';
 import { ArrangeModal } from '@/components/modals/ArrangeModal';
 import { LayoutModal } from '@/components/modals/LayoutModal';
 import { ChangeLayoutModal } from '@/components/modals/ChangeLayoutModal';
 import { SettingsModal } from '@/components/modals/SettingsModal';
+import { ConfirmModal } from '@/components/modals/ConfirmModal';
+import {
+  copySelection,
+  cutSelection,
+  duplicateSelection,
+  pasteInAppClipboard,
+  hasInAppClipboard,
+  clearInAppClipboard,
+  isInputOrModalFocused,
+} from '@/lib/clipboard';
 
 export function AppShell() {
   const { jobs, assets } = useSessionStore();
@@ -27,6 +37,22 @@ export function AppShell() {
   // Initialize theme listener and load stored theme on mount
   useEffect(() => {
     initTheme();
+    if (typeof window !== 'undefined') {
+      (window as any).__AZ_TEST__ = {
+        useSessionStore,
+        useUiStore,
+        requestPrint,
+        requestExportPdf,
+        startExportPdf,
+        copySelection,
+        cutSelection,
+        duplicateSelection,
+        pasteInAppClipboard,
+        hasInAppClipboard,
+        clearInAppClipboard,
+        isInputOrModalFocused,
+      };
+    }
   }, [initTheme]);
 
   // Warn before closing tab if ANY job has at least one element OR if any image asset exists
@@ -47,15 +73,10 @@ export function AppShell() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [jobs, assets]);
 
-  // Global paste listener for images
+  // Global paste listener for images & in-app pictures
   useEffect(() => {
     const handlePaste = (e: ClipboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      const isInput = Boolean(
-        target?.closest?.('[contenteditable="true"], input, textarea, select')
-      );
-
-      if (isInput || Boolean(useUiStore.getState().multiImport)) return;
+      if (isInputOrModalFocused()) return;
 
       const files: File[] = [];
       if (e.clipboardData) {
@@ -75,9 +96,19 @@ export function AppShell() {
         }
       }
 
+      // Priority: if the system clipboard has an image, paste that image.
+      // Otherwise, if the in-app clipboard has pictures, paste those.
+      // Clear the in-app clipboard when a system image is pasted so the two never mix.
       if (files.length > 0) {
         e.preventDefault();
+        clearInAppClipboard();
         importFiles(files);
+        return;
+      }
+
+      if (hasInAppClipboard()) {
+        e.preventDefault();
+        pasteInAppClipboard();
         return;
       }
 
@@ -86,10 +117,6 @@ export function AppShell() {
       if (plainText && plainText.trim().length > 0) {
         e.preventDefault();
         newTextPage(plainText);
-        useUiStore.getState().setMessage({
-          type: 'info',
-          text: 'Pasted text into a new page. Ctrl+Z to undo.',
-        });
       }
     };
 
@@ -97,18 +124,14 @@ export function AppShell() {
     return () => document.removeEventListener('paste', handlePaste);
   }, []);
 
-  // Global undo/redo keyboard listeners (Ctrl/Cmd+Z, Ctrl/Cmd+Y, Ctrl/Cmd+Shift+Z)
+  // Global keyboard shortcuts (Ctrl/Cmd+Z, Y, P, C, X, D, V)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      const isInput = Boolean(
-        target?.closest?.('[contenteditable="true"], input, textarea, select')
-      );
-
-      if (isInput || Boolean(useUiStore.getState().multiImport)) return;
+      if (isInputOrModalFocused()) return;
 
       if (e.ctrlKey || e.metaKey) {
-        if (e.key === 'z' || e.key === 'Z') {
+        const key = e.key.toLowerCase();
+        if (key === 'z') {
           e.preventDefault();
           const { activeJobId, undo, redo } = useSessionStore.getState();
           if (e.shiftKey) {
@@ -116,13 +139,28 @@ export function AppShell() {
           } else {
             undo(activeJobId);
           }
-        } else if (e.key === 'y' || e.key === 'Y') {
+        } else if (key === 'y') {
           e.preventDefault();
           const { activeJobId, redo } = useSessionStore.getState();
           redo(activeJobId);
-        } else if (e.key === 'p' || e.key === 'P') {
+        } else if (key === 'p') {
           e.preventDefault();
           requestPrint();
+        } else if (key === 'c') {
+          const handled = copySelection();
+          if (handled) {
+            e.preventDefault();
+          }
+        } else if (key === 'x') {
+          const handled = cutSelection();
+          if (handled) {
+            e.preventDefault();
+          }
+        } else if (key === 'd') {
+          const handled = duplicateSelection();
+          if (handled) {
+            e.preventDefault();
+          }
         }
       }
     };
@@ -131,7 +169,7 @@ export function AppShell() {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  const { outputMode, checkNotice, exportProgress, setCheckNotice, assetSrcOverrides } = useUiStore();
+  const { outputMode, checkNotice, exportProgress, setCheckNotice, assetSrcOverrides, message } = useUiStore();
   const { activeJobId } = useSessionStore();
   const activeJob = jobs.find((j) => j.id === activeJobId) || jobs[0];
 
@@ -151,7 +189,7 @@ export function AppShell() {
 
   return (
     <>
-      <div id="app-root" className="min-w-[1100px] h-screen flex flex-col bg-surface overflow-hidden">
+      <div id="app-root" className="min-w-[1100px] h-screen flex flex-col bg-transparent overflow-hidden">
         {/* Top Navigation & Controls */}
         <TopBar />
 
@@ -219,11 +257,28 @@ export function AppShell() {
         />
       )}
 
+      {/* Toast Notification (above zoom bar) - only for warnings and errors */}
+      {message && (message.type === 'warn' || message.type === 'error') && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="no-print fixed bottom-[86px] left-1/2 -translate-x-1/2 z-50 flex items-center gap-2.5 px-4 py-2.5 bg-glass backdrop-blur-[14px] border border-line2 rounded-[14px] shadow-lg text-[14px] font-bold text-ink pointer-events-none transition-all select-none"
+        >
+          <span
+            className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+              message.type === 'warn' ? 'bg-yellow' : 'bg-red'
+            }`}
+          />
+          <span>{message.text}</span>
+        </div>
+      )}
+
       {/* Multi-image import modals */}
       <ArrangeModal />
       <LayoutModal />
       <ChangeLayoutModal />
       <SettingsModal />
+      <ConfirmModal />
     </>
   );
 }

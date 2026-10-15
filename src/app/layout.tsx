@@ -10,11 +10,11 @@ export const metadata: Metadata = {
 const themeInitScript = `
 (function() {
   try {
-    var stored = localStorage.getItem('azpr-theme') || 'system';
+    var stored = localStorage.getItem('azpr-theme') || 'dark';
     var isDark = stored === 'dark' || (stored === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
     document.documentElement.dataset.theme = isDark ? 'dark' : 'light';
   } catch (e) {
-    document.documentElement.dataset.theme = 'light';
+    document.documentElement.dataset.theme = 'dark';
   }
 })();
 `;
@@ -29,7 +29,7 @@ export default function RootLayout({
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
-      <body className="font-sans bg-surface text-ink antialiased">
+      <body className="bg-bg text-text antialiased">
         {children}
       </body>
     </html>

@@ -12,6 +12,7 @@ import { CutGuides } from './CutGuides';
 export interface PageViewProps {
   page: Page;
   pageIndex: number;
+  totalPages?: number;
   jobId: string;
   jobSettings: Settings;
   zoom: number;
@@ -25,6 +26,7 @@ export interface PageViewProps {
 export function PageView({
   page,
   pageIndex,
+  totalPages = 1,
   jobId,
   jobSettings,
   zoom,
@@ -233,7 +235,47 @@ export function PageView({
   };
 
   return (
-    <div className="flex flex-col items-center" data-page-id={page.id}>
+    <div className="relative flex flex-col items-center" data-page-id={page.id}>
+      {/* 4 corner crop marks 4px outside the page */}
+      <div
+        className="absolute pointer-events-none z-10"
+        style={{
+          top: '-4px',
+          left: '-4px',
+          width: `${pageWidthPx + 8}px`,
+          height: `${pageHeightPx + 8}px`,
+        }}
+      >
+        <svg
+          className="absolute top-0 left-0 w-3 h-3 overflow-visible pointer-events-none"
+          viewBox="0 0 12 12"
+          fill="none"
+        >
+          <path d="M0 12 V0 H12" stroke="var(--color-faint)" strokeWidth="1" />
+        </svg>
+        <svg
+          className="absolute top-0 right-0 w-3 h-3 overflow-visible pointer-events-none"
+          viewBox="0 0 12 12"
+          fill="none"
+        >
+          <path d="M12 12 V0 H0" stroke="var(--color-faint)" strokeWidth="1" />
+        </svg>
+        <svg
+          className="absolute bottom-0 left-0 w-3 h-3 overflow-visible pointer-events-none"
+          viewBox="0 0 12 12"
+          fill="none"
+        >
+          <path d="M0 0 V12 H12" stroke="var(--color-faint)" strokeWidth="1" />
+        </svg>
+        <svg
+          className="absolute bottom-0 right-0 w-3 h-3 overflow-visible pointer-events-none"
+          viewBox="0 0 12 12"
+          fill="none"
+        >
+          <path d="M12 0 V12 H0" stroke="var(--color-faint)" strokeWidth="1" />
+        </svg>
+      </div>
+
       {/* Physical Sheet Canvas */}
       <div
         data-page-sheet="true"
@@ -244,6 +286,7 @@ export function PageView({
         style={{
           width: `${pageWidthPx}px`,
           height: `${pageHeightPx}px`,
+          backgroundColor: '#FBFAF6',
           boxShadow: 'var(--shadow-sheet)',
         }}
         className={`relative overflow-hidden bg-sheet rounded-none cursor-pointer transition-shadow select-none ${
@@ -380,11 +423,16 @@ export function PageView({
       {/* Caption & Page Controls Below Sheet */}
       <div
         style={{ width: `${pageWidthPx}px` }}
-        className="mt-2 px-1 flex items-center justify-between text-xs text-muted select-none"
+        className="mt-3 px-1 flex items-center justify-between text-xs select-none"
       >
-        <span className="truncate">
-          Page {pageIndex + 1} · {paper.name} · {formattedWidth} × {formattedHeight}
-        </span>
+        <div className="flex items-center gap-2.5 truncate">
+          <span className="px-3 py-1 rounded-[999px] bg-surface border border-line font-bold text-[13px] text-text shadow-xs shrink-0">
+            Page {pageIndex + 1} of {totalPages}
+          </span>
+          <span className="text-muted text-[13px] font-normal truncate">
+            {paper.name} · {formattedWidth} × {formattedHeight}
+          </span>
+        </div>
 
         {canDelete && (
           <button
@@ -393,7 +441,7 @@ export function PageView({
               e.stopPropagation();
               onDelete?.();
             }}
-            className="text-red hover:underline text-xs cursor-pointer ml-3 shrink-0"
+            className="text-red hover:underline text-xs cursor-pointer ml-3 shrink-0 font-medium"
           >
             Delete page
           </button>
