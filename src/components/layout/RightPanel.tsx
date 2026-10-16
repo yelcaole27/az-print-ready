@@ -820,7 +820,7 @@ export function RightPanel() {
             }`}
           >
             <Plus className="w-4 h-4" />
-            <span>+ New page</span>
+            <span>New page</span>
           </button>
         </div>
       </div>

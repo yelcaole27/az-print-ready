@@ -212,6 +212,7 @@ export function Sidebar() {
     setDocFit,
     setActivePage,
     select,
+    clearSelection,
     setMultiImport,
     setDraggingAssetId,
   } = useUiStore();
@@ -389,23 +390,7 @@ export function Sidebar() {
           setActivePage(pageWithElement.id);
         }
       } else {
-        const res = addBlocks(activeJob.id, [
-          { kind: 'fit', assetIds: [assetId] },
-        ]);
-        if (res.ok) {
-          setActiveAssetId(assetId);
-          if (res.firstPageId) {
-            setActivePage(res.firstPageId);
-            const updatedJob = useSessionStore
-              .getState()
-              .jobs.find((j) => j.id === activeJob.id);
-            const page = updatedJob?.pages.find((p) => p.id === res.firstPageId);
-            const el = page?.elements.find((e) => e.assetId === assetId) || page?.elements[0];
-            if (page && el) {
-              select({ pageId: page.id, elementId: el.id });
-            }
-          }
-        }
+        clearSelection();
       }
     }
   };
@@ -474,21 +459,31 @@ export function Sidebar() {
     return [];
   }, [isAllSelected, jobPictureAssetIds, selectedIds, selectedPageId, activeJob, activeAssetId]);
 
+  const placedElements = React.useMemo(() => {
+    if (!activeJob || targetAssetIds.length === 0) return [];
+    return activeJob.pages
+      .flatMap((p) => p.elements)
+      .filter((el) => el.assetId && targetAssetIds.includes(el.assetId));
+  }, [activeJob, targetAssetIds]);
+
+  const isPlaced = placedElements.length > 0;
+
   // Active asset, block, and sheet row lookup
   const activeAsset = assets.find((a) => a.id === activeAssetId);
-  const activeBlock = activeAsset
+  const activeBlock = isPlaced && activeAsset
     ? activeJob?.blocks.find((b) => b.assetIds.includes(activeAsset.id))
-    : (targetAssetIds.length > 0
+    : (isPlaced && targetAssetIds.length > 0
         ? activeJob?.blocks.find((b) => b.assetIds.some((id) => targetAssetIds.includes(id)))
         : null);
 
-  const activeRow =
-    (activeAsset && activeBlock?.kind === 'sheet'
-      ? activeBlock.rows?.find((r) => r.assetId === activeAsset.id)
-      : undefined) ||
-    (targetAssetIds.length > 0
-      ? activeJob?.blocks.find((b) => b.kind === 'sheet')?.rows?.find((r) => targetAssetIds.includes(r.assetId))
-      : undefined);
+  const activeRow = isPlaced
+    ? ((activeAsset && activeBlock?.kind === 'sheet'
+        ? activeBlock.rows?.find((r) => r.assetId === activeAsset.id)
+        : undefined) ||
+      (targetAssetIds.length > 0
+        ? activeJob?.blocks.find((b) => b.kind === 'sheet')?.rows?.find((r) => targetAssetIds.includes(r.assetId))
+        : undefined))
+    : undefined;
 
   const isCollageBlock = Boolean(
     activeBlock && activeBlock.kind === 'collage'
@@ -625,16 +620,47 @@ export function Sidebar() {
     }
   };
 
-  const isDefaultActive = !isCollageBlock && activeBlock?.kind === 'fit';
-  const is1x1Active = !isCollageBlock && activeRow?.size.id === '1x1';
-  const is15Active = !isCollageBlock && activeRow?.size.id === '1.5x1.5';
-  const is2x2Active = !isCollageBlock && activeRow?.size.id === '2x2';
-  const isWalletActive = !isCollageBlock && activeRow?.size.id === 'wallet';
+  const uniformSizeId = React.useMemo(() => {
+    if (!isPlaced || placedElements.length === 0 || !activeJob) return null;
+
+    const sizeIds = placedElements.map((el) => {
+      const page = activeJob.pages.find((p) => p.elements.some((e) => e.id === el.id));
+      const block = page?.blockId ? activeJob.blocks.find((b) => b.id === page.blockId) : null;
+      if (block) {
+        if (block.kind === 'fit') return 'default';
+        if (block.kind === 'fill') return 'fill';
+        if (block.kind === 'width') return 'width';
+        if (block.kind === 'sheet') {
+          const row = block.rows?.find((r) => r.assetId === el.assetId);
+          if (row?.size?.id) return row.size.id;
+        }
+      }
+      if (Math.abs(el.wMm - 25.4) < 1 && Math.abs(el.hMm - 25.4) < 1) return '1x1';
+      if (Math.abs(el.wMm - 38.1) < 1 && Math.abs(el.hMm - 38.1) < 1) return '1.5x1.5';
+      if (Math.abs(el.wMm - 50.8) < 1 && Math.abs(el.hMm - 50.8) < 1) return '2x2';
+      if (
+        (Math.abs(el.wMm - 63.5) < 1 && Math.abs(el.hMm - 88.9) < 1) ||
+        (Math.abs(el.wMm - 88.9) < 1 && Math.abs(el.hMm - 63.5) < 1)
+      ) {
+        return 'wallet';
+      }
+      return `custom-${Math.round(el.wMm)}x${Math.round(el.hMm)}`;
+    });
+
+    const first = sizeIds[0];
+    const allSame = sizeIds.every((s) => s === first);
+    return allSame ? first : null;
+  }, [isPlaced, placedElements, activeJob]);
+
+  const isDefaultActive = !isCollageBlock && uniformSizeId === 'default';
+  const is1x1Active = !isCollageBlock && uniformSizeId === '1x1';
+  const is15Active = !isCollageBlock && uniformSizeId === '1.5x1.5';
+  const is2x2Active = !isCollageBlock && uniformSizeId === '2x2';
+  const isWalletActive = !isCollageBlock && uniformSizeId === 'wallet';
   const isMoreActive =
     !isCollageBlock &&
-    ((activeBlock?.kind === 'fill' || activeBlock?.kind === 'width') ||
-      (Boolean(activeRow) &&
-        !['1x1', '1.5x1.5', '2x2', 'wallet'].includes(activeRow?.size.id || '')));
+    uniformSizeId !== null &&
+    !['default', '1x1', '1.5x1.5', '2x2', 'wallet'].includes(uniformSizeId);
 
   const [customQuickSets, setCustomQuickSets] = useState<QuickSet[]>(() => loadCustomQuickSets());
 
@@ -663,6 +689,7 @@ export function Sidebar() {
   const isSaveDisabled =
     isSaveFull ||
     targetAssetIds.length === 0 ||
+    !isPlaced ||
     !activeRow ||
     isDefaultActive ||
     activeBlock?.kind === 'fit';
@@ -868,7 +895,7 @@ export function Sidebar() {
               </div>
             </div>
 
-            {/* 2 equal buttons Upright and Sideways */}
+            {/* 2 equal buttons Portrait and Landscape */}
             <div className="grid grid-cols-2 gap-2 mb-2.5">
               <button
                 type="button"
@@ -880,7 +907,7 @@ export function Sidebar() {
                 } focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue`}
               >
                 <div className="w-3 h-4 border-[1.5px] border-current rounded-[2px]" />
-                <span>Upright</span>
+                <span>Portrait</span>
               </button>
               <button
                 type="button"
@@ -892,7 +919,7 @@ export function Sidebar() {
                 } focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue`}
               >
                 <div className="w-4 h-3 border-[1.5px] border-current rounded-[2px]" />
-                <span>Sideways</span>
+                <span>Landscape</span>
               </button>
             </div>
 
@@ -944,7 +971,7 @@ export function Sidebar() {
                 <span>No pictures added yet.</span>
               </div>
             ) : (
-              <div className="flex flex-wrap gap-[10px] mb-2.5">
+              <div className="flex flex-wrap gap-2 mb-2.5">
                 {jobAssets.map((asset) => {
                   const isActive = asset.id === activeAssetId;
                   return (
@@ -957,13 +984,13 @@ export function Sidebar() {
                         e.dataTransfer.effectAllowed = 'copy';
                         setDraggingAssetId(asset.id);
 
-                        // Ghost under cursor: 62px, 80% opacity, non-animated
+                        // Ghost under cursor: 56px, 80% opacity, non-animated
                         const ghost = document.createElement('div');
                         ghost.style.position = 'fixed';
                         ghost.style.top = '-9999px';
                         ghost.style.left = '-9999px';
-                        ghost.style.width = '62px';
-                        ghost.style.height = '62px';
+                        ghost.style.width = '56px';
+                        ghost.style.height = '56px';
                         ghost.style.borderRadius = '14px';
                         ghost.style.overflow = 'hidden';
                         ghost.style.opacity = '0.8';
@@ -978,7 +1005,7 @@ export function Sidebar() {
                         ghost.appendChild(img);
 
                         document.body.appendChild(ghost);
-                        e.dataTransfer.setDragImage(ghost, 31, 31);
+                        e.dataTransfer.setDragImage(ghost, 28, 28);
 
                         setTimeout(() => {
                           ghost.remove();
@@ -990,7 +1017,7 @@ export function Sidebar() {
                         useUiStore.getState().setIsHoveringAddPage(false);
                       }}
                       onClick={() => handlePictureClick(asset.id)}
-                      className={`group relative w-[62px] h-[62px] rounded-[14px] overflow-hidden bg-surface2 cursor-pointer transition-all ${
+                      className={`group relative w-[56px] h-[56px] rounded-[14px] overflow-hidden bg-surface2 cursor-pointer transition-all ${
                         isActive
                           ? 'border-2 border-blue shadow-xs'
                           : 'border-[1.5px] border-line hover:border-line2'
@@ -1032,7 +1059,7 @@ export function Sidebar() {
                     type="button"
                     onClick={handleAllClick}
                     aria-label={isAllSelected ? 'Deselect all pictures' : 'Select all pictures'}
-                    className={`w-[62px] h-[62px] rounded-[14px] flex items-center justify-center font-bold text-xs transition-all cursor-pointer select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue ${
+                    className={`w-[56px] h-[56px] rounded-[14px] flex items-center justify-center font-bold text-xs transition-all cursor-pointer select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue ${
                       isAllSelected
                         ? 'border-2 border-blue bg-blue-tint text-blue shadow-xs'
                         : 'border-[1.5px] border-line hover:border-line2 bg-surface2 text-ink'
@@ -1333,7 +1360,11 @@ export function Sidebar() {
                         <button
                           type="button"
                           onClick={() => applyQuickSet(chip)}
-                          className="h-[32px] px-3 rounded-[12px] border-[1.5px] border-line bg-surface2 text-ink hover:border-line2 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue"
+                          className={`h-[32px] px-3 rounded-[12px] border-[1.5px] text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue ${
+                            isPlaced && uniformSizeId === chip.size.id && (activeRow?.qty ?? placedElements.length) === chip.qty
+                              ? 'border-blue bg-blue-tint text-blue'
+                              : 'border-line bg-surface2 text-ink hover:border-line2'
+                          }`}
                         >
                           <span>{chip.label}</span>
                         </button>
@@ -1370,7 +1401,7 @@ export function Sidebar() {
           </div>
 
           {/* HOW MANY? Section */}
-          {(activeRow || (targetAssetIds.length > 0 && activeJob?.blocks.some((b) => b.kind === 'sheet' && b.rows?.some((r) => targetAssetIds.includes(r.assetId))))) && (
+          {targetAssetIds.length > 0 && (
             <div className="flex flex-col shrink-0">
               <h2 className="text-[11.5px] font-bold uppercase tracking-[0.14em] text-faint mb-2.5">
                 How many?
@@ -1381,32 +1412,37 @@ export function Sidebar() {
                 <div className="h-[48px] flex items-center border-[1.5px] border-line rounded-[12px] bg-surface2 overflow-hidden flex-1">
                   <button
                     type="button"
+                    disabled={!isPlaced}
                     onClick={() => handleQtyStep(-1)}
-                    className="w-12 h-full flex items-center justify-center text-ink hover:bg-surface border-r border-line cursor-pointer select-none font-bold text-lg"
+                    className="w-12 h-full flex items-center justify-center text-ink hover:bg-surface border-r border-line cursor-pointer select-none font-bold text-lg disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                     aria-label="Decrease quantity"
                   >
                     -
                   </button>
                   <input
-                    key={`${targetAssetIds.join('-')}-${activeRow?.qty ?? 1}-${activeRow?.fillPage ? 'fill' : 'normal'}`}
+                    key={`${targetAssetIds.join('-')}-${isPlaced ? (activeRow?.qty ?? placedElements.length) : 'unplaced'}-${isPlaced && activeRow?.fillPage ? 'fill' : 'normal'}`}
                     type="number"
                     min={1}
                     max={500}
-                    defaultValue={activeRow?.qty ?? 1}
-                    onBlur={(e) => handleQtyInput(e.target.value)}
+                    disabled={!isPlaced}
+                    defaultValue={isPlaced ? (activeRow?.qty ?? placedElements.length) : 1}
+                    onBlur={(e) => isPlaced && handleQtyInput(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
+                      if (e.key === 'Enter' && isPlaced) {
                         handleQtyInput((e.target as HTMLInputElement).value);
                         (e.target as HTMLInputElement).blur();
                       }
                     }}
-                    className="w-full h-full text-center font-heading font-extrabold text-[22px] text-ink bg-transparent focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    className={`w-full h-full text-center font-heading font-extrabold text-[22px] bg-transparent focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${
+                      isPlaced ? 'text-ink' : 'text-faint opacity-60'
+                    }`}
                     aria-label="Quantity"
                   />
                   <button
                     type="button"
+                    disabled={!isPlaced}
                     onClick={() => handleQtyStep(1)}
-                    className="w-12 h-full flex items-center justify-center text-ink hover:bg-surface border-l border-line cursor-pointer select-none font-bold text-lg"
+                    className="w-12 h-full flex items-center justify-center text-ink hover:bg-surface border-l border-line cursor-pointer select-none font-bold text-lg disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                     aria-label="Increase quantity"
                   >
                     +
@@ -1416,10 +1452,11 @@ export function Sidebar() {
                 {/* Fill page toggle button */}
                 <button
                   type="button"
+                  disabled={!isPlaced}
                   onClick={handleToggleFillPage}
-                  aria-pressed={Boolean(activeRow?.fillPage)}
-                  className={`h-[48px] px-3.5 rounded-[12px] border-[1.5px] text-xs font-semibold transition-all cursor-pointer shrink-0 ${
-                    activeRow?.fillPage
+                  aria-pressed={Boolean(isPlaced && activeRow?.fillPage)}
+                  className={`h-[48px] px-3.5 rounded-[12px] border-[1.5px] text-xs font-semibold transition-all cursor-pointer shrink-0 disabled:opacity-40 disabled:cursor-not-allowed ${
+                    isPlaced && activeRow?.fillPage
                       ? 'border-blue bg-blue-tint text-blue'
                       : 'border-line bg-surface2 text-ink hover:border-line2'
                   } focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue`}

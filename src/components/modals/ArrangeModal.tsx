@@ -462,7 +462,7 @@ export function ArrangeModal() {
           }`}
         >
           <Plus className="w-5 h-5" />
-          <span>+ New page</span>
+          <span>New page</span>
         </div>
       </div>
 

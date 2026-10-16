@@ -348,23 +348,24 @@ export function PageStack() {
   };
 
   return (
-    <div
-      ref={containerRef}
-      onClick={(e) => {
-        // Deselect if clicking on the background container itself or non-element area
-        const target = e.target as HTMLElement;
-        if (!target.closest('[data-element-id]') && !target.closest('.bg-sheet')) {
-          useUiStore.getState().setEditingElement(null);
-          clearSelection();
-        }
-      }}
-      onDragEnter={handleDragEnter}
-      onDragLeave={handleDragLeave}
-      onDragOver={handleDragOver}
-      onDrop={handleDrop}
-      data-canvas-scroll="true"
-      className="relative flex-1 bg-transparent overflow-y-auto overflow-x-hidden p-8 select-none"
-    >
+    <div className="relative flex-1 overflow-hidden">
+      <div
+        ref={containerRef}
+        onClick={(e) => {
+          // Deselect if clicking on the background container itself or non-element area
+          const target = e.target as HTMLElement;
+          if (!target.closest('[data-element-id]') && !target.closest('.bg-sheet')) {
+            useUiStore.getState().setEditingElement(null);
+            clearSelection();
+          }
+        }}
+        onDragEnter={handleDragEnter}
+        onDragLeave={handleDragLeave}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+        data-canvas-scroll="true"
+        className="w-full h-full bg-transparent overflow-y-auto overflow-x-hidden p-8 pb-36 select-none"
+      >
       {/* Drag & Drop Overlay */}
       {isDraggingOver && (
         <div className="absolute inset-4 z-50 rounded-[12px] border-2 border-dashed border-blue bg-blue/10 backdrop-blur-[1px] flex items-center justify-center pointer-events-none">
@@ -453,6 +454,7 @@ export function PageStack() {
           </Button>
         </div>
       </div>
+    </div>
 
       {/* Floating Zoom Bar Controls */}
       <ZoomBar
