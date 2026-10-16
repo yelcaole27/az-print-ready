@@ -998,7 +998,7 @@ export function Sidebar() {
                         ghost.style.zIndex = '99999';
 
                         const img = document.createElement('img');
-                        img.src = asset.objectUrl;
+                        img.src = asset.thumbUrl || asset.objectUrl;
                         img.style.width = '100%';
                         img.style.height = '100%';
                         img.style.objectFit = 'cover';
@@ -1024,7 +1024,7 @@ export function Sidebar() {
                       }`}
                     >
                       <img
-                        src={asset.objectUrl}
+                        src={asset.thumbUrl || asset.objectUrl}
                         alt={asset.name}
                         className="w-full h-full object-cover select-none pointer-events-none"
                       />

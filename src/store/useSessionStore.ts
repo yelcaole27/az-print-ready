@@ -295,6 +295,76 @@ function checkAndClearSelection() {
   }
 }
 
+function revokeAssetUrls(asset: ImageAsset) {
+  const urls = [asset.objectUrl, asset.previewUrl, asset.thumbUrl, asset.originalUrl];
+  for (const url of urls) {
+    if (url && url.startsWith('blob:')) {
+      try {
+        URL.revokeObjectURL(url);
+      } catch {
+        // ignore
+      }
+    }
+  }
+}
+
+function getAllReferencedAssetIds(
+  jobs: Job[],
+  history: Record<string, { past: Job[]; future: Job[] }>
+): Set<string> {
+  const referenced = new Set<string>();
+  const addFromJob = (j: Job) => {
+    if (!j) return;
+    if (j.assetIds) {
+      for (const id of j.assetIds) referenced.add(id);
+    }
+    if (j.pages) {
+      for (const p of j.pages) {
+        if (p.elements) {
+          for (const el of p.elements) {
+            if (el.assetId) referenced.add(el.assetId);
+          }
+        }
+      }
+    }
+    if (j.blocks) {
+      for (const b of j.blocks) {
+        if (b.assetIds) {
+          for (const id of b.assetIds) referenced.add(id);
+        }
+      }
+    }
+  };
+
+  for (const j of jobs) addFromJob(j);
+  for (const h of Object.values(history)) {
+    if (h.past) {
+      for (const j of h.past) addFromJob(j);
+    }
+    if (h.future) {
+      for (const j of h.future) addFromJob(j);
+    }
+  }
+  return referenced;
+}
+
+function pruneUnreferencedAssets(
+  assets: ImageAsset[],
+  jobs: Job[],
+  history: Record<string, { past: Job[]; future: Job[] }>
+): ImageAsset[] {
+  const referenced = getAllReferencedAssetIds(jobs, history);
+  const remaining: ImageAsset[] = [];
+  for (const asset of assets) {
+    if (referenced.has(asset.id)) {
+      remaining.push(asset);
+    } else {
+      revokeAssetUrls(asset);
+    }
+  }
+  return remaining;
+}
+
 export const useSessionStore = create<SessionState>((set, get) => ({
   jobs: [initialJob],
   activeJobId: initialJobId,
@@ -308,15 +378,18 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
     const currentHistory = state.history[jobId] || { past: [], future: [] };
     const updatedPast = [...currentHistory.past, currentJob].slice(-50);
+    const nextHistory = {
+      ...state.history,
+      [jobId]: {
+        past: updatedPast,
+        future: [],
+      },
+    };
+    const nextAssets = pruneUnreferencedAssets(state.assets, state.jobs, nextHistory);
 
     set({
-      history: {
-        ...state.history,
-        [jobId]: {
-          past: updatedPast,
-          future: [],
-        },
-      },
+      history: nextHistory,
+      assets: nextAssets,
     });
   },
 
@@ -443,7 +516,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   removeJob: (jobId: string) => {
-    const { jobs, activeJobId, history } = get();
+    const { jobs, activeJobId, history, assets } = get();
     if (jobs.length <= 1) return;
 
     const jobIndex = jobs.findIndex((j) => j.id === jobId);
@@ -460,10 +533,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const nextHistory = { ...history };
     delete nextHistory[jobId];
 
+    const nextAssets = pruneUnreferencedAssets(assets, nextJobs, nextHistory);
+
     set({
       jobs: nextJobs,
       activeJobId: nextActiveId,
       history: nextHistory,
+      assets: nextAssets,
     });
   },
 
@@ -2156,43 +2232,34 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   discardAssets: (ids: string[]) => {
     const idsSet = new Set(ids);
-    const { assets } = get();
+    const { assets, jobs, history } = get();
+    const referenced = getAllReferencedAssetIds(jobs, history);
     for (const asset of assets) {
-      if (idsSet.has(asset.id)) {
-        try {
-          URL.revokeObjectURL(asset.objectUrl);
-        } catch {
-          // Ignore revoke errors
-        }
+      if (idsSet.has(asset.id) && !referenced.has(asset.id)) {
+        revokeAssetUrls(asset);
       }
     }
 
     set((state) => ({
-      assets: state.assets.filter((a) => !idsSet.has(a.id)),
+      assets: state.assets.filter((a) => !idsSet.has(a.id) || referenced.has(a.id)),
     }));
   },
 
   removeAsset: (assetId: string) => {
-    const { assets } = get();
-    const assetToRemove = assets.find((a) => a.id === assetId);
-    if (assetToRemove) {
-      try {
-        URL.revokeObjectURL(assetToRemove.objectUrl);
-      } catch {
-        // Ignore revoke errors
-      }
+    const activeJobId = get().activeJobId;
+    if (activeJobId) {
+      get().commit(activeJobId);
     }
-
-    const remainingAssets = assets.filter((a) => a.id !== assetId);
 
     set((state) => {
       const updatedJobs = state.jobs.map((job) => {
+        if (activeJobId && job.id !== activeJobId) return job;
         const blocks = job.blocks || [];
         const blocksToRemove = new Set<string>();
         const updatedBlocks: Block[] = [];
         const regeneratedPagesMap = new Map<string, Page[]>();
 
-        const ctx = ctxForJob(job, remainingAssets);
+        const ctx = ctxForJob(job, state.assets);
 
         for (const block of blocks) {
           if (!block.assetIds.includes(assetId)) {
@@ -2261,8 +2328,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       });
 
       return {
-        assets: remainingAssets,
-        history: {},
         jobs: updatedJobs,
       };
     });

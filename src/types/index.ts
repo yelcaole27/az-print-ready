@@ -18,6 +18,10 @@ export interface ImageAsset {
   id: string;
   name: string;
   objectUrl: string;
+  thumbUrl?: string;
+  previewUrl?: string;
+  originalBlob?: Blob;
+  originalUrl?: string;
   pxW: number;
   pxH: number;
 }

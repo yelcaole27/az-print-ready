@@ -3,6 +3,103 @@ import { ImageAsset } from '@/types';
 import { useSessionStore } from '@/store/useSessionStore';
 import { useUiStore } from '@/store/useUiStore';
 
+async function generateImageCopies(file: File): Promise<{
+  origW: number;
+  origH: number;
+  previewUrl: string;
+  thumbUrl: string;
+}> {
+  const hasAlpha =
+    file.type === 'image/png' ||
+    file.type === 'image/webp' ||
+    file.type === 'image/gif' ||
+    file.type === 'image/svg+xml';
+  const mimeType = hasAlpha ? 'image/png' : 'image/jpeg';
+  const quality = 0.85;
+
+  if (typeof createImageBitmap === 'function') {
+    const fullBitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    const origW = fullBitmap.width;
+    const origH = fullBitmap.height;
+
+    // 1600px preview (never upscale beyond original)
+    const maxPrev = 1600;
+    const prevScale = Math.min(1, maxPrev / Math.max(origW, origH));
+    const prevW = Math.max(1, Math.round(origW * prevScale));
+    const prevH = Math.max(1, Math.round(origH * prevScale));
+
+    const prevBitmap = await createImageBitmap(fullBitmap, {
+      resizeWidth: prevW,
+      resizeHeight: prevH,
+      resizeQuality: 'high',
+    });
+
+    // 200px thumbnail
+    const maxThumb = 200;
+    const thumbScale = Math.min(1, maxThumb / Math.max(origW, origH));
+    const thumbW = Math.max(1, Math.round(origW * thumbScale));
+    const thumbH = Math.max(1, Math.round(origH * thumbScale));
+
+    const thumbBitmap = await createImageBitmap(fullBitmap, {
+      resizeWidth: thumbW,
+      resizeHeight: thumbH,
+      resizeQuality: 'high',
+    });
+
+    // Close fullBitmap immediately to free original pixels
+    fullBitmap.close();
+
+    const renderToBlob = async (bitmap: ImageBitmap, w: number, h: number): Promise<Blob> => {
+      if (typeof OffscreenCanvas !== 'undefined') {
+        const off = new OffscreenCanvas(w, h);
+        const ctx = off.getContext('2d');
+        if (ctx) ctx.drawImage(bitmap, 0, 0);
+        const blob = await off.convertToBlob({ type: mimeType, quality });
+        off.width = 0;
+        off.height = 0;
+        return blob;
+      } else {
+        const c = document.createElement('canvas');
+        c.width = w;
+        c.height = h;
+        const ctx = c.getContext('2d');
+        if (ctx) ctx.drawImage(bitmap, 0, 0);
+        const blob = await new Promise<Blob>((resolve) => {
+          c.toBlob((b) => resolve(b || new Blob()), mimeType, quality);
+        });
+        c.width = 0;
+        c.height = 0;
+        return blob;
+      }
+    };
+
+    const prevBlob = await renderToBlob(prevBitmap, prevW, prevH);
+    prevBitmap.close();
+
+    const thumbBlob = await renderToBlob(thumbBitmap, thumbW, thumbH);
+    thumbBitmap.close();
+
+    const previewUrl = URL.createObjectURL(prevBlob);
+    const thumbUrl = URL.createObjectURL(thumbBlob);
+
+    return { origW, origH, previewUrl, thumbUrl };
+  } else {
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error('Image decode error'));
+      img.src = objectUrl;
+    });
+    return {
+      origW: img.naturalWidth,
+      origH: img.naturalHeight,
+      previewUrl: objectUrl,
+      thumbUrl: objectUrl,
+    };
+  }
+}
+
 export async function importFiles(files: File[]): Promise<void> {
   if (!files || files.length === 0) return;
 
@@ -28,24 +125,17 @@ export async function importFiles(files: File[]): Promise<void> {
     }
 
     try {
-      const objectUrl = URL.createObjectURL(file);
-      const dims = await new Promise<{ pxW: number; pxH: number }>((resolve, reject) => {
-        const img = new Image();
-        img.onload = () => {
-          resolve({ pxW: img.naturalWidth, pxH: img.naturalHeight });
-        };
-        img.onerror = () => {
-          reject(new Error('Image decode error'));
-        };
-        img.src = objectUrl;
-      });
+      const copies = await generateImageCopies(file);
 
       validAssets.push({
         id: nanoid(),
         name: file.name,
-        objectUrl,
-        pxW: dims.pxW,
-        pxH: dims.pxH,
+        objectUrl: copies.previewUrl,
+        thumbUrl: copies.thumbUrl,
+        previewUrl: copies.previewUrl,
+        originalBlob: file,
+        pxW: copies.origW,
+        pxH: copies.origH,
       });
     } catch {
       failedCount++;
@@ -60,6 +150,14 @@ export async function importFiles(files: File[]): Promise<void> {
     const activeJob =
       sessionStore.jobs.find((j) => j.id === sessionStore.activeJobId) ||
       sessionStore.jobs[0];
+
+    const totalJobPics = (activeJob?.assetIds?.length || 0) + validAssets.length;
+    if (totalJobPics > 40) {
+      uiStore.setMessage({
+        type: 'warn',
+        text: 'Many pictures: the app may get slow.',
+      });
+    }
 
     const isStartState =
       !activeJob ||

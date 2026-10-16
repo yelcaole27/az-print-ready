@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Lock, Unlock, ChevronDown, Move, Plus } from 'lucide-react';
+import { Lock, Unlock, ChevronDown, Move, Plus, Trash2 } from 'lucide-react';
 import { useSessionStore } from '@/store/useSessionStore';
 import { useUiStore } from '@/store/useUiStore';
 import { mmToUnit, unitToMm } from '@/lib/units';
@@ -197,7 +197,7 @@ function ElementInspectorForm({
           ) : asset ? (
             <div className="w-[52px] h-[72px] rounded-[10px] overflow-hidden border border-line bg-surface shrink-0">
               <img
-                src={asset.objectUrl}
+                src={asset.thumbUrl || asset.objectUrl}
                 alt={asset.name}
                 className="w-full h-full object-cover select-none pointer-events-none"
               />
@@ -597,6 +597,7 @@ export function RightPanel() {
     sendToBack,
     removeElement,
     removeElements,
+    removePage,
   } = useSessionStore();
 
   const {
@@ -617,6 +618,24 @@ export function RightPanel() {
   const [isHoveringNewPage, setIsHoveringNewPage] = useState(false);
 
   const activeJob = jobs.find((j) => j.id === activeJobId) || jobs[0];
+
+  const handleDeleteEmptyPage = (pageId: string) => {
+    if (!activeJob) return;
+    const pageIndex = activeJob.pages.findIndex((p) => p.id === pageId);
+    if (pageIndex === -1) return;
+
+    const remaining = activeJob.pages.filter((p) => p.id !== pageId);
+    if (activePageId === pageId) {
+      if (remaining.length > 0) {
+        const neighborIndex = Math.max(0, pageIndex - 1);
+        setActivePage(remaining[neighborIndex].id);
+      } else {
+        setActivePage(null);
+      }
+    }
+    clearSelection();
+    removePage(activeJob.id, pageId);
+  };
   const unit = activeJob.settings.unit;
 
   const firstPage = activeJob.pages[0];
@@ -749,7 +768,7 @@ export function RightPanel() {
                       >
                         {elAsset && (
                           <img
-                            src={elAsset.objectUrl}
+                            src={elAsset.thumbUrl || elAsset.objectUrl}
                             alt=""
                             className="w-full h-full object-cover pointer-events-none"
                           />
@@ -760,7 +779,7 @@ export function RightPanel() {
                 </div>
 
                 {/* Two lines */}
-                <div className="flex flex-col min-w-0">
+                <div className="flex flex-col min-w-0 flex-1">
                   <span className="text-sm font-bold text-ink truncate">
                     Page {idx + 1}
                   </span>
@@ -768,6 +787,21 @@ export function RightPanel() {
                     {summary}
                   </span>
                 </div>
+
+                {summary === 'Empty' && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteEmptyPage(page.id);
+                    }}
+                    className="w-8 h-8 rounded-[10px] flex items-center justify-center text-muted hover:text-red hover:bg-red/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red transition-colors shrink-0 ml-auto"
+                    aria-label="Delete page"
+                    title="Delete page"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
               </div>
             );
           })}

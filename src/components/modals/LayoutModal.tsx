@@ -270,7 +270,7 @@ export function LayoutModal() {
                         }}
                       >
                         <img
-                          src={asset.objectUrl}
+                          src={asset.thumbUrl || asset.objectUrl}
                           alt=""
                           draggable={false}
                           className="w-full h-full object-cover block select-none pointer-events-none"

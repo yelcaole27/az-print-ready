@@ -15,7 +15,8 @@ import { newTextPage } from '@/lib/textActions';
 import { PrintView } from '@/components/output/PrintView';
 import { CheckNotice } from '@/components/output/CheckNotice';
 import { ExportProgress } from '@/components/output/ExportProgress';
-import { requestPrint, requestExportPdf, startExportPdf, confirmNotice, cancelExportPdf } from '@/lib/outputManager';
+import { requestPrint, requestExportPdf, startExportPdf, confirmNotice, cancelExportPdf, getOutputPageIndexes } from '@/lib/outputManager';
+import { loadPagePrintImages } from '@/lib/printImageLoader';
 import { ArrangeModal } from '@/components/modals/ArrangeModal';
 import { LayoutModal } from '@/components/modals/LayoutModal';
 import { ChangeLayoutModal } from '@/components/modals/ChangeLayoutModal';
@@ -45,6 +46,9 @@ export function AppShell() {
         requestPrint,
         requestExportPdf,
         startExportPdf,
+        getOutputPageIndexes,
+        loadPagePrintImages,
+        importFiles,
         copySelection,
         cutSelection,
         duplicateSelection,

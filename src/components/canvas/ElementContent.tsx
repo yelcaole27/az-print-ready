@@ -79,7 +79,7 @@ export function ElementContent({
     );
   }
 
-  const imgSrc = srcOverride || asset.objectUrl;
+  const imgSrc = srcOverride || asset.previewUrl || asset.objectUrl;
 
   if (element.crop) {
     return (

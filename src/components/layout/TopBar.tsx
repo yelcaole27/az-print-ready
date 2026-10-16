@@ -97,7 +97,7 @@ export function TopBar() {
 
         {/* Right cluster: Undo, Redo, Print, Save as PDF, Settings, Theme Toggle */}
         <div className="flex items-center gap-2">
-          {!isStartScreen && (
+          {(!isStartScreen || hasUndo) && (
             <>
               {/* Undo */}
               <Tooltip content="Undo (Ctrl+Z)">
@@ -124,30 +124,34 @@ export function TopBar() {
                   <Redo2 className="w-5 h-5" />
                 </button>
               </Tooltip>
-
-              {/* Print Button */}
-              <button
-                type="button"
-                onClick={requestPrint}
-                aria-label="Print job"
-                style={{ boxShadow: '0 8px 24px -6px rgba(244,112,103,.6)' }}
-                className="h-[44px] px-5 rounded-[14px] bg-[#F47067] text-[#1E0B09] font-bold text-[16px] flex items-center gap-2 hover:brightness-110 active:brightness-95 transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
-              >
-                <Printer className="w-5 h-5 shrink-0" />
-                <span>Print</span>
-              </button>
-
-              {/* Save as PDF */}
-              <button
-                type="button"
-                onClick={requestExportPdf}
-                aria-label="Save as PDF"
-                className="h-[44px] px-4 rounded-[14px] border border-white/[0.22] bg-transparent text-[#F3F0E9] hover:bg-white/10 active:bg-white/20 font-medium text-[14px] transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#69B7F7]"
-              >
-                Save as PDF
-              </button>
             </>
           )}
+
+          {/* Print Button */}
+          <button
+            type="button"
+            disabled={isStartScreen}
+            onClick={requestPrint}
+            aria-label="Print job"
+            title={isStartScreen ? 'Add a picture first' : 'Print job'}
+            style={isStartScreen ? undefined : { boxShadow: '0 8px 24px -6px rgba(244,112,103,.6)' }}
+            className="h-[44px] px-5 rounded-[14px] bg-[#F47067] text-[#1E0B09] font-bold text-[16px] flex items-center gap-2 hover:brightness-110 active:brightness-95 transition-all cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:brightness-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+          >
+            <Printer className="w-5 h-5 shrink-0" />
+            <span>Print</span>
+          </button>
+
+          {/* Save as PDF */}
+          <button
+            type="button"
+            disabled={isStartScreen}
+            onClick={requestExportPdf}
+            aria-label="Save as PDF"
+            title={isStartScreen ? 'Add a picture first' : 'Save as PDF'}
+            className="h-[44px] px-4 rounded-[14px] border border-white/[0.22] bg-transparent text-[#F3F0E9] hover:bg-white/10 active:bg-white/20 font-medium text-[14px] transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#69B7F7]"
+          >
+            Save as PDF
+          </button>
 
           {/* Settings Button */}
           <Tooltip content="Settings">

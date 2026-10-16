@@ -1,4 +1,6 @@
 import { useUiStore } from '@/store/useUiStore';
+import { getOutputPageIndexes } from './outputManager';
+import { loadPagePrintImages } from './printImageLoader';
 
 let isPrinting = false;
 
@@ -6,10 +8,27 @@ export async function executePrint(): Promise<void> {
   if (isPrinting) return;
   isPrinting = true;
 
-  const { setOutputMode, setMessage } = useUiStore.getState();
+  const { setOutputMode, setMessage, setAssetSrcOverrides } = useUiStore.getState();
 
   // Close any open toast before print dialog opens
   setMessage(null);
+
+  // Load 300 DPI original pictures for the pages being printed
+  const outputData = getOutputPageIndexes();
+  let printCleanup: (() => void) | null = null;
+
+  if (outputData && outputData.pageIndexes.length > 0) {
+    const allElements = outputData.pageIndexes.flatMap(
+      (idx) => outputData.job.pages[idx]?.elements || []
+    );
+    const printImages = await loadPagePrintImages(
+      allElements,
+      outputData.assetsById,
+      { asDataUrl: false, warnOnFallback: true }
+    );
+    setAssetSrcOverrides(printImages.overrides);
+    printCleanup = printImages.cleanup;
+  }
 
   // 1. Mount print root
   setOutputMode('print');
@@ -47,6 +66,11 @@ export async function executePrint(): Promise<void> {
   const cleanup = () => {
     window.removeEventListener('afterprint', cleanup);
     isPrinting = false;
+    if (printCleanup) {
+      printCleanup();
+      printCleanup = null;
+    }
+    setAssetSrcOverrides(null);
     setOutputMode(null);
   };
 
@@ -57,7 +81,7 @@ export async function executePrint(): Promise<void> {
     if (isPrinting) {
       cleanup();
     }
-  }, 1000);
+  }, 3000);
 
   // 6. Trigger native print dialog directly
   window.print();

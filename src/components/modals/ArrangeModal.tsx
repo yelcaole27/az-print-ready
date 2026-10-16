@@ -357,7 +357,7 @@ export function ArrangeModal() {
                       className="w-[62px] h-[62px] rounded-[14px] border border-line hover:border-blue overflow-hidden relative cursor-grab active:cursor-grabbing transition-colors shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue"
                     >
                       <img
-                        src={asset.objectUrl}
+                        src={asset.thumbUrl || asset.objectUrl}
                         alt={asset.name}
                         draggable={false}
                         className="w-full h-full object-cover select-none pointer-events-none"

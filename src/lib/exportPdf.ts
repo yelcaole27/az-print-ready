@@ -2,6 +2,7 @@ import type { Job, ImageAsset } from '@/types';
 import { getPageDimensionsMm } from '@/lib/pageGeometry';
 import { getFontEmbedCSS } from './pdfFonts';
 import { useUiStore } from '@/store/useUiStore';
+import { loadPagePrintImages } from './printImageLoader';
 
 export interface ExportPdfOptions {
   job: Job;
@@ -83,33 +84,6 @@ export async function exportPdf({
 
   const total = pageIndexes.length;
   setExportProgress({ done: 0, total });
-
-  // Convert every image used by output pages from blob URL to data URL BEFORE rendering
-  const usedAssetIds = new Set<string>();
-  for (const idx of pageIndexes) {
-    const page = job.pages[idx];
-    if (page) {
-      for (const el of page.elements) {
-        if (el.assetId) usedAssetIds.add(el.assetId);
-      }
-    }
-  }
-
-  const overrides: Record<string, string> = {};
-  await Promise.all(
-    Array.from(usedAssetIds).map(async (assetId) => {
-      const asset = assetsById.get(assetId);
-      if (!asset?.objectUrl) return;
-      try {
-        const dataUrl = await blobToDataUrl(asset.objectUrl);
-        overrides[assetId] = dataUrl;
-      } catch {
-        // Continue with original url if conversion fails
-      }
-    })
-  );
-
-  setAssetSrcOverrides(overrides);
 
   // Mount print root in export mode
   setOutputMode('export');
@@ -198,6 +172,26 @@ export async function exportPdf({
       const { wMm, hMm } = getPageDimensionsMm(page);
       const hasImage = page.elements.some((el) => el.type === 'image');
 
+      // Load 300 DPI original pictures on demand for this page
+      const pageImages = await loadPagePrintImages(page.elements, assetsById, {
+        asDataUrl: true,
+        warnOnFallback: true,
+      });
+      setAssetSrcOverrides(pageImages.overrides);
+
+      // Wait 1 frame and await decode for this page's images
+      await new Promise((r) => requestAnimationFrame(r));
+      const imgs = pageNode.querySelectorAll('img');
+      await Promise.all(
+        Array.from(imgs).map(async (img) => {
+          try {
+            await img.decode();
+          } catch {
+            // ignore
+          }
+        })
+      );
+
       const rasterOptions = {
         pixelRatio,
         backgroundColor: '#FFFFFF',
@@ -235,6 +229,10 @@ export async function exportPdf({
         format = 'PNG';
         dataUrl = await htmlToImage.toPng(pageNode, rasterOptions);
       }
+
+      // Cleanup page overrides and release references
+      pageImages.cleanup();
+      setAssetSrcOverrides(null);
 
       if (signal?.aborted) return;
 
