@@ -106,9 +106,8 @@ export function ElementContent({
   }
 
   const rotation = element.rotation || 0;
-  const fit = element.fit || 'cover';
   const objectFit: React.CSSProperties['objectFit'] =
-    fit === 'stretch' ? 'fill' : fit;
+    element.fit === 'stretch' ? 'fill' : 'cover';
 
   if (rotation === 90) {
     const widthPx = element.wMm * MM_TO_PX * zoom;

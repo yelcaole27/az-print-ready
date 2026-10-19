@@ -792,14 +792,26 @@ export function ElementBox({
 
       if (handle === 'e') {
         newW = Math.max(minSizeMm, start.origW + dxMm);
+        if (keepAspect) {
+          newH = Math.max(minSizeMm, newW / start.aspect);
+        }
       } else if (handle === 'w') {
         newW = Math.max(minSizeMm, start.origW - dxMm);
         newX = start.origX + start.origW - newW;
+        if (keepAspect) {
+          newH = Math.max(minSizeMm, newW / start.aspect);
+        }
       } else if (handle === 's') {
         newH = Math.max(minSizeMm, start.origH + dyMm);
+        if (keepAspect) {
+          newW = Math.max(minSizeMm, newH * start.aspect);
+        }
       } else if (handle === 'n') {
         newH = Math.max(minSizeMm, start.origH - dyMm);
         newY = start.origY + start.origH - newH;
+        if (keepAspect) {
+          newW = Math.max(minSizeMm, newH * start.aspect);
+        }
       } else if (handle === 'se') {
         if (keepAspect) {
           const delta =
@@ -1040,7 +1052,7 @@ export function ElementBox({
           width: `${widthPx}px`,
           height: `${heightPx}px`,
         }}
-        className={`absolute select-none overflow-visible box-border ${cursorClass} ${borderClass} ${
+        className={`absolute select-none overflow-visible box-border ${cursorClass} ${
           isMovingWithGhost
             ? 'opacity-35'
             : isDraggingNow
@@ -1092,6 +1104,9 @@ export function ElementBox({
           )}
         </div>
 
+        {/* Border overlay */}
+        <div className={`absolute inset-0 pointer-events-none box-border ${borderClass}`} />
+
         {/* Overflow Warning indicator (Top-right yellow dot on text boxes) */}
         {element.type === 'text' && isOverflow && (
           <div className="absolute top-1 right-1 z-30 no-print">
@@ -1108,7 +1123,7 @@ export function ElementBox({
           </div>
         )}
 
-        {/* 4 Corner Resize Handles (Only for selected, unlocked elements, not while editing or moving) */}
+        {/* 8 Resize Handles (4 Corner + 4 Edge, 9px centered exactly) */}
         {isSelected && !isPartOfMulti && !isLocked && !isEditing && !isMovingWithGhost && (
           <>
             {/* Top-Left */}
@@ -1118,12 +1133,26 @@ export function ElementBox({
               onPointerUp={handlePointerUpResize}
               className="absolute -top-[4.5px] -left-[4.5px] w-[9px] h-[9px] bg-white border border-blue cursor-nwse-resize z-40 box-border"
             />
+            {/* Top-Center */}
+            <div
+              onPointerDown={(e) => handlePointerDownResize(e, 'n')}
+              onPointerMove={handlePointerMoveResize}
+              onPointerUp={handlePointerUpResize}
+              className="absolute -top-[4.5px] left-1/2 -translate-x-1/2 w-[9px] h-[9px] bg-white border border-blue cursor-ns-resize z-40 box-border"
+            />
             {/* Top-Right */}
             <div
               onPointerDown={(e) => handlePointerDownResize(e, 'ne')}
               onPointerMove={handlePointerMoveResize}
               onPointerUp={handlePointerUpResize}
               className="absolute -top-[4.5px] -right-[4.5px] w-[9px] h-[9px] bg-white border border-blue cursor-nesw-resize z-40 box-border"
+            />
+            {/* Middle-Right */}
+            <div
+              onPointerDown={(e) => handlePointerDownResize(e, 'e')}
+              onPointerMove={handlePointerMoveResize}
+              onPointerUp={handlePointerUpResize}
+              className="absolute top-1/2 -right-[4.5px] -translate-y-1/2 w-[9px] h-[9px] bg-white border border-blue cursor-ew-resize z-40 box-border"
             />
             {/* Bottom-Right */}
             <div
@@ -1132,12 +1161,26 @@ export function ElementBox({
               onPointerUp={handlePointerUpResize}
               className="absolute -bottom-[4.5px] -right-[4.5px] w-[9px] h-[9px] bg-white border border-blue cursor-nwse-resize z-40 box-border"
             />
+            {/* Bottom-Center */}
+            <div
+              onPointerDown={(e) => handlePointerDownResize(e, 's')}
+              onPointerMove={handlePointerMoveResize}
+              onPointerUp={handlePointerUpResize}
+              className="absolute -bottom-[4.5px] left-1/2 -translate-x-1/2 w-[9px] h-[9px] bg-white border border-blue cursor-ns-resize z-40 box-border"
+            />
             {/* Bottom-Left */}
             <div
               onPointerDown={(e) => handlePointerDownResize(e, 'sw')}
               onPointerMove={handlePointerMoveResize}
               onPointerUp={handlePointerUpResize}
               className="absolute -bottom-[4.5px] -left-[4.5px] w-[9px] h-[9px] bg-white border border-blue cursor-nesw-resize z-40 box-border"
+            />
+            {/* Middle-Left */}
+            <div
+              onPointerDown={(e) => handlePointerDownResize(e, 'w')}
+              onPointerMove={handlePointerMoveResize}
+              onPointerUp={handlePointerUpResize}
+              className="absolute top-1/2 -left-[4.5px] -translate-y-1/2 w-[9px] h-[9px] bg-white border border-blue cursor-ew-resize z-40 box-border"
             />
           </>
         )}

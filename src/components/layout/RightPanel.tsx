@@ -25,10 +25,32 @@ function getPageSummary(page: Page, job: Job): string {
   const block = job.blocks.find((b) => b.id === page.blockId);
   if (block) {
     if (block.kind === 'sheet') {
-      const row = block.rows?.[0];
-      const sizeId = row?.size?.id || 'Size';
-      const label = sizeId === 'wallet' ? 'Wallet' : sizeId;
-      return `${label} × ${page.elements.length}`;
+      const rowCounts = new Map<string, number>();
+      for (const el of page.elements) {
+        const key = el.rowId || (el.assetId ? `${el.assetId}-${el.wMm}x${el.hMm}` : el.id);
+        rowCounts.set(key, (rowCounts.get(key) || 0) + 1);
+      }
+      const parts: string[] = [];
+      const accountedRowIds = new Set<string>();
+      if (block.rows) {
+        for (const row of block.rows) {
+          if (row.id && rowCounts.has(row.id)) {
+            const count = rowCounts.get(row.id)!;
+            const sizeId = row.size?.id || 'Size';
+            const label = sizeId === 'wallet' ? 'Wallet' : sizeId;
+            parts.push(`${label} × ${count}`);
+            accountedRowIds.add(row.id);
+          }
+        }
+      }
+      for (const [key, count] of rowCounts.entries()) {
+        if (!accountedRowIds.has(key)) {
+          parts.push(`${count} pictures`);
+        }
+      }
+      if (parts.length > 0) {
+        return parts.join(', ');
+      }
     }
     if (block.kind === 'fill') return 'Full page';
     if (block.kind === 'fit') return 'Fit page';
@@ -116,6 +138,25 @@ function ElementInspectorForm({
   const dpi = isText ? 0 : getEffectiveDpi(element, asset);
   const currentFit = element.fit || 'cover';
   const minSizeMm = isText ? 10 : 5;
+
+  const pageObj = job.pages.find((p) => p.id === pageId);
+  const activeBlock = job.blocks?.find((b) => b.id === pageObj?.blockId);
+  const activeRow = activeBlock?.kind === 'sheet'
+    ? ((element.rowId ? activeBlock.rows?.find((r) => r.id === element.rowId) : undefined) ||
+       activeBlock.rows?.find((r) => r.assetId === element.assetId))
+    : undefined;
+
+  let variantSizeLabel = '';
+  if (activeRow?.size?.id) {
+    variantSizeLabel = activeRow.size.id === 'wallet' ? 'Wallet' : activeRow.size.id;
+  } else if (!isText && element.wMm > 0 && element.hMm > 0) {
+    const wIn = element.wMm / 25.4;
+    const hIn = element.hMm / 25.4;
+    if (Math.abs(wIn - 1) < 0.1 && Math.abs(hIn - 1) < 0.1) variantSizeLabel = '1x1';
+    else if (Math.abs(wIn - 2) < 0.1 && Math.abs(hIn - 2) < 0.1) variantSizeLabel = '2x2';
+    else if ((Math.abs(wIn - 2.5) < 0.1 && Math.abs(hIn - 3.5) < 0.1) || (Math.abs(wIn - 3.5) < 0.1 && Math.abs(hIn - 2.5) < 0.1)) variantSizeLabel = 'Wallet';
+  }
+  const variantCount = activeRow?.qty ?? 1;
 
   const applyField = (field: 'x' | 'y' | 'w' | 'h' | 'padding' | 'border') => {
     if (isSliced) return;
@@ -216,15 +257,22 @@ function ElementInspectorForm({
               {isText ? 'Text Box' : asset?.name || 'Selected Element'}
             </span>
             {!isText && (
-              <div className="flex items-center gap-1.5 mt-1">
-                <span
-                  className={`w-2 h-2 rounded-full shrink-0 ${
-                    dpi >= 150 ? 'bg-green' : dpi >= 100 ? 'bg-yellow' : 'bg-red'
-                  }`}
-                />
-                <span className="text-xs text-muted font-medium">
-                  {dpi >= 150 ? 'Sharp' : 'Soft'}
-                </span>
+              <div className="flex items-center gap-2 mt-1">
+                {variantSizeLabel ? (
+                  <span className="text-xs text-ink font-semibold">
+                    {variantSizeLabel} × {variantCount}
+                  </span>
+                ) : null}
+                <div className="flex items-center gap-1.5">
+                  <span
+                    className={`w-2 h-2 rounded-full shrink-0 ${
+                      dpi >= 150 ? 'bg-green' : dpi >= 100 ? 'bg-yellow' : 'bg-red'
+                    }`}
+                  />
+                  <span className="text-xs text-muted font-medium">
+                    {dpi >= 150 ? 'Sharp' : 'Soft'}
+                  </span>
+                </div>
               </div>
             )}
             {isSliced && (
@@ -677,20 +725,45 @@ export function RightPanel() {
   return (
     <aside className="w-[300px] shrink-0 bg-surface border-l border-line p-5 flex flex-col gap-[22px] select-none text-ink overflow-y-auto">
       {/* Top: Picture Card or Multi-select Card */}
-      {isMultiSelect ? (
-        <div className="bg-surface2 rounded-[18px] p-[14px] border border-line flex items-center justify-between shrink-0">
-          <span className="font-bold text-[15px] text-ink">
-            {selectedIds.length} pictures selected
-          </span>
-          <button
-            type="button"
-            onClick={handleDeleteMulti}
-            className="h-[34px] px-3 rounded-[10px] border border-red/30 bg-red/10 text-red text-xs font-semibold hover:bg-red hover:text-white transition-colors cursor-pointer"
-          >
-            Delete
-          </button>
-        </div>
-      ) : selected && selectedPage && selectedElement ? (
+      {isMultiSelect ? (() => {
+        const selectedEls = selectedPage ? selectedPage.elements.filter((el) => selectedIds.includes(el.id)) : [];
+        const pageBlock = activeJob.blocks?.find((b) => b.id === selectedPage?.blockId);
+        const sizes = selectedEls.map((el) => {
+          if (pageBlock?.kind === 'sheet') {
+            const row = (el.rowId ? pageBlock.rows?.find((r) => r.id === el.rowId) : undefined) ||
+              pageBlock.rows?.find((r) => r.assetId === el.assetId);
+            if (row?.size?.id) return row.size.id === 'wallet' ? 'Wallet' : row.size.id;
+          }
+          const wIn = el.wMm / 25.4;
+          const hIn = el.hMm / 25.4;
+          if (Math.abs(wIn - 1) < 0.1 && Math.abs(hIn - 1) < 0.1) return '1x1';
+          if (Math.abs(wIn - 2) < 0.1 && Math.abs(hIn - 2) < 0.1) return '2x2';
+          if ((Math.abs(wIn - 2.5) < 0.1 && Math.abs(hIn - 3.5) < 0.1) || (Math.abs(wIn - 3.5) < 0.1 && Math.abs(hIn - 2.5) < 0.1)) return 'Wallet';
+          return `${Math.round(wIn)}x${Math.round(hIn)}`;
+        });
+        const firstSize = sizes[0];
+        const sharedSize = sizes.length > 0 && sizes.every((s) => s === firstSize) ? firstSize : 'Multiple sizes';
+
+        return (
+          <div className="bg-surface2 rounded-[18px] p-[14px] border border-line flex items-center justify-between shrink-0">
+            <div className="flex flex-col min-w-0">
+              <span className="font-bold text-[15px] text-ink">
+                {selectedIds.length} pictures selected
+              </span>
+              <span className="text-xs text-muted font-medium mt-0.5">
+                {sharedSize}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={handleDeleteMulti}
+              className="h-[34px] px-3 rounded-[10px] border border-red/30 bg-red/10 text-red text-xs font-semibold hover:bg-red hover:text-white transition-colors cursor-pointer"
+            >
+              Delete
+            </button>
+          </div>
+        );
+      })() : selected && selectedPage && selectedElement ? (
         <ElementInspectorForm
           key={`${selectedElement.id}-${selectedElement.xMm}-${selectedElement.yMm}-${selectedElement.wMm}-${selectedElement.hMm}-${unit}`}
           element={selectedElement}

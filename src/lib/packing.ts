@@ -21,6 +21,7 @@ export interface PackCopiesArgs {
   fillActiveOnly: boolean;
   settings: Settings;
   assetId: string;
+  rowId?: string;
   fit: 'cover' | 'contain';
 }
 
@@ -49,7 +50,8 @@ export function findSpot(
   w: number,
   h: number,
   printable: Rect,
-  gap: number
+  gap: number,
+  nearPoint?: { x: number; y: number }
 ): Rect | null {
   const candidateXs = new Set<number>();
   const candidateYs = new Set<number>();
@@ -64,6 +66,8 @@ export function findSpot(
 
   const sortedYs = Array.from(candidateYs).sort((a, b) => a - b);
   const sortedXs = Array.from(candidateXs).sort((a, b) => a - b);
+
+  const validSpots: Rect[] = [];
 
   for (const y of sortedYs) {
     if (y + h > printable.y + printable.h + 0.01) continue;
@@ -85,9 +89,21 @@ export function findSpot(
       }
 
       if (!overlaps) {
-        return { x, y, w, h };
+        if (!nearPoint) {
+          return { x, y, w, h };
+        }
+        validSpots.push({ x, y, w, h });
       }
     }
+  }
+
+  if (nearPoint && validSpots.length > 0) {
+    validSpots.sort((a, b) => {
+      const distA = Math.hypot(a.x + w / 2 - nearPoint.x, a.y + h / 2 - nearPoint.y);
+      const distB = Math.hypot(b.x + w / 2 - nearPoint.x, b.y + h / 2 - nearPoint.y);
+      return distA - distB;
+    });
+    return validSpots[0];
   }
 
   return null;
@@ -103,6 +119,7 @@ export function packCopies({
   fillActiveOnly,
   settings,
   assetId,
+  rowId,
   fit,
 }: PackCopiesArgs): PackCopiesResult {
   const validStartPage = pages[startPageIndex] || pages[0];
@@ -171,6 +188,7 @@ export function packCopies({
         hMm: spot.h,
         rotation,
         assetId,
+        rowId,
         fit,
         cropGuides: false,
       };
@@ -218,6 +236,7 @@ export function packCopies({
             hMm: spot.h,
             rotation,
             assetId,
+            rowId,
             fit,
             cropGuides: false,
           };

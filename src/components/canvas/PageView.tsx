@@ -1,10 +1,11 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Page, Settings, PageElement } from '@/types';
+import { Page, Settings, PageElement, Block, SheetRow } from '@/types';
 import { PAPERS } from '@/lib/constants/papers';
 import { getPageDimensionsMm, mmToScreenPx, screenPxToMm, MM_TO_PX } from '@/lib/pageGeometry';
 import { formatSize } from '@/lib/units';
+import { BlockCtx, generateBlockPages, blockSignature } from '@/lib/blocks';
 import { useUiStore } from '@/store/useUiStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import { nanoid } from 'nanoid';
@@ -268,20 +269,120 @@ export function PageView({
     const job = sessionStore.jobs.find((j) => j.id === jobId);
     if (!job) return;
 
-    // 1. Determine size
-    let wMm: number;
-    let hMm: number;
-
-    const existingElement = job.pages
-      .flatMap((p) => p.elements)
-      .find((el) => el.assetId === assetId);
-
+    const block = job.blocks?.find((b) => b.id === page.blockId);
     const { wMm: pageWMm, hMm: pageHMm } = getPageDimensionsMm(page);
     const effectiveMargin = job.settings.borderless
       ? 0
       : (job.settings.marginMm ?? 6.35);
     const printableW = Math.max(10, pageWMm - effectiveMargin * 2);
     const printableH = Math.max(10, pageHMm - effectiveMargin * 2);
+
+    if (block && block.kind === 'sheet') {
+      const existingRows = (block.rows || []).map((r) => ({ ...r, id: r.id || nanoid() }));
+      const existingRowForAsset = existingRows.find((r) => r.assetId === assetId);
+
+      let targetSize: { id: string; wMm: number; hMm: number };
+      if (existingRowForAsset) {
+        targetSize = { ...existingRowForAsset.size };
+      } else {
+        const existingEl = job.pages.flatMap((p) => p.elements).find((el) => el.assetId === assetId);
+        if (existingEl) {
+          targetSize = {
+            id: `custom-${Math.round(existingEl.wMm)}x${Math.round(existingEl.hMm)}`,
+            wMm: existingEl.wMm,
+            hMm: existingEl.hMm,
+          };
+        } else {
+          const asset = sessionStore.assets.find((a) => a.id === assetId);
+          const ar = asset && asset.pxW && asset.pxH ? asset.pxW / asset.pxH : 1;
+          const maxW = printableW * 0.5;
+          const maxH = printableH * 0.5;
+          let sW: number;
+          let sH: number;
+          if (ar >= maxW / maxH) {
+            sW = maxW;
+            sH = maxW / ar;
+          } else {
+            sH = maxH;
+            sW = maxH * ar;
+          }
+          targetSize = { id: `custom-${Math.round(sW)}x${Math.round(sH)}`, wMm: sW, hMm: sH };
+        }
+      }
+
+      sessionStore.commit(jobId);
+
+      const newRowId = nanoid();
+      const newRow: SheetRow = {
+        id: newRowId,
+        assetId,
+        size: targetSize,
+        qty: 1,
+        fillPage: false,
+        crop: false,
+      };
+
+      const updatedRows = [...existingRows, newRow];
+      const updatedBlock: Block = {
+        ...block,
+        assetIds: Array.from(new Set(updatedRows.map((r) => r.assetId))),
+        rows: updatedRows,
+        generatedSig: '',
+      };
+
+      const ctx: BlockCtx = {
+        paperId: page.paperId,
+        orientation: page.orientation,
+        pageWMm,
+        pageHMm,
+        marginMm: effectiveMargin,
+        gapMm: job.settings.gapMm,
+        assetsById: Object.fromEntries(sessionStore.assets.map((a) => [a.id, a])),
+      };
+
+      const newPages = generateBlockPages(updatedBlock, ctx);
+      updatedBlock.generatedSig = blockSignature(newPages);
+
+      const firstIndex = job.pages.findIndex((p) => p.blockId === block.id);
+      const pagesBefore = firstIndex === -1
+        ? job.pages.filter((p) => p.blockId !== block.id)
+        : job.pages.slice(0, firstIndex).filter((p) => p.blockId !== block.id);
+      const pagesAfter = firstIndex === -1
+        ? []
+        : job.pages.slice(firstIndex).filter((p) => p.blockId !== block.id);
+      const finalPages = [...pagesBefore, ...newPages, ...pagesAfter];
+
+      useSessionStore.setState((s) => ({
+        jobs: s.jobs.map((j) =>
+          j.id === jobId
+            ? {
+                ...j,
+                blocks: (j.blocks || []).map((b) => (b.id === block.id ? updatedBlock : b)),
+                pages: finalPages,
+              }
+            : j
+        ),
+      }));
+
+      const createdEl = newPages.flatMap((p) => p.elements).find((el) => el.rowId === newRowId);
+      if (createdEl) {
+        const targetPage = newPages.find((p) => p.elements.some((e) => e.id === createdEl.id));
+        if (targetPage) {
+          uiStore.setActivePage(targetPage.id);
+          uiStore.select({ pageId: targetPage.id, elementId: createdEl.id });
+          uiStore.setActiveAssetId(assetId);
+        }
+      }
+      return;
+    }
+
+    // 1. Determine size for free page
+    let wMm: number;
+    let hMm: number;
+
+    const existingElement = job.pages
+      .flatMap((p) => p.elements)
+      .find((el) => el.assetId === assetId);
 
     if (existingElement) {
       wMm = existingElement.wMm;
@@ -333,6 +434,7 @@ export function PageView({
       wMm: Math.round(wMm * 100) / 100,
       hMm: Math.round(hMm * 100) / 100,
       rotation: 0,
+      fit: 'cover',
     };
 
     sessionStore.addElement(jobId, page.id, newElement);
@@ -485,7 +587,7 @@ export function PageView({
                   width: `${boxW}px`,
                   height: `${boxH}px`,
                 }}
-                className="absolute border border-dashed border-sheet-blue pointer-events-none z-20"
+                className="absolute border border-dashed border-sheet-blue pointer-events-none z-20 box-border"
               />
             );
           })()}

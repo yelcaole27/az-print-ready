@@ -35,6 +35,7 @@ export interface PageElement {
   hMm: number;
   rotation: 0 | 90 | 180 | 270;
   assetId?: string;
+  rowId?: string;
   fit?: 'contain' | 'cover' | 'stretch';
   cropGuides?: unknown;
   html?: string;
@@ -53,7 +54,16 @@ export interface PageElement {
 
 export type BlockKind = 'fit' | 'fill' | 'width' | 'collage' | 'sheet';
 
+export type PictureTarget =
+  | string
+  | string[]
+  | {
+      assetIds?: string[];
+      rowIds?: string[];
+    };
+
 export interface SheetRow {
+  id?: string;
   assetId: string;
   size: { id: string; wMm: number; hMm: number };
   qty: number;
@@ -76,6 +86,8 @@ export interface Page {
   orientation: 'portrait' | 'landscape';
   elements: PageElement[];
   blockId?: string;
+  generatedSig?: string;
+  stayPut?: boolean;
 }
 
 export interface Settings {

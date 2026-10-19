@@ -276,7 +276,7 @@ export function placedToElements(placed: Placed[]): PageElement[] {
     wMm: p.wMm,
     hMm: p.hMm,
     rotation: 0,
-    fit: 'contain',
+    fit: 'cover',
     cropGuides: false,
   }));
 }

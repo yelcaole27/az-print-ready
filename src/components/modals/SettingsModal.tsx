@@ -22,7 +22,6 @@ export function SettingsModal() {
   const setUnit = useSessionStore((s) => s.setUnit);
   const updateSettings = useSessionStore((s) => s.updateSettings);
   const clearElements = useSessionStore((s) => s.clearElements);
-  const hasManualEdits = useSessionStore((s) => s.hasManualEdits);
 
   const activeJob = jobs.find((j) => j.id === activeJobId) || jobs[0];
   const currentUnit = activeJob?.settings.unit || 'in';
@@ -57,23 +56,6 @@ export function SettingsModal() {
       setMarginDraft(null);
       return;
     }
-    if (hasManualEdits(activeJob.id)) {
-      openConfirmModal({
-        title: 'Reset manual',
-        accentWord: 'changes?',
-        message: 'Changing space around will rearrange pictures on the page.',
-        confirmLabel: 'Reset and apply',
-        destructive: true,
-        onConfirm: () => {
-          setMarginDraft(null);
-          updateSettings(activeJob.id, { marginMm: mm });
-        },
-        onCancel: () => {
-          setMarginDraft(null);
-        },
-      });
-      return;
-    }
     setMarginDraft(null);
     updateSettings(activeJob.id, { marginMm: mm });
   };
@@ -88,23 +70,6 @@ export function SettingsModal() {
     const mm = Math.min(20, Math.max(0, unitToMm(val, currentUnit)));
     if (Math.abs(mm - activeJob.settings.gapMm) < 0.001) {
       setGapDraft(null);
-      return;
-    }
-    if (hasManualEdits(activeJob.id)) {
-      openConfirmModal({
-        title: 'Reset manual',
-        accentWord: 'changes?',
-        message: 'Changing space between will rearrange pictures on the page.',
-        confirmLabel: 'Reset and apply',
-        destructive: true,
-        onConfirm: () => {
-          setGapDraft(null);
-          updateSettings(activeJob.id, { gapMm: mm });
-        },
-        onCancel: () => {
-          setGapDraft(null);
-        },
-      });
       return;
     }
     setGapDraft(null);

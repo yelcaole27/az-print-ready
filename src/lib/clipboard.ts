@@ -3,7 +3,8 @@ import { useSessionStore } from '@/store/useSessionStore';
 import { useUiStore } from '@/store/useUiStore';
 import { getPageDimensionsMm } from '@/lib/pageGeometry';
 import { findSpot, printableRect } from '@/lib/packing';
-import type { PageElement } from '@/types';
+import { BlockCtx, generateBlockPages, blockSignature } from '@/lib/blocks';
+import type { PageElement, Block, SheetRow } from '@/types';
 
 interface InAppClipboard {
   elements: PageElement[];
@@ -212,6 +213,99 @@ export function pasteInAppClipboard(): boolean {
   const targetPage =
     activeJob.pages.find((p) => p.id === targetPageId) || activeJob.pages[0];
   if (!targetPage) return false;
+
+  const block = activeJob.blocks?.find((b) => b.id === targetPage.blockId);
+  if (block && block.kind === 'sheet') {
+    commit(activeJob.id);
+    const existingRows = (block.rows || []).map((r) => ({ ...r, id: r.id || nanoid() }));
+    const newRowIds: string[] = [];
+    const addedRows: SheetRow[] = [];
+
+    for (const el of inAppClipboard.elements) {
+      if (!el.assetId) continue;
+      const newRowId = nanoid();
+      newRowIds.push(newRowId);
+      const sourceRow = existingRows.find((r) => r.id === el.rowId) ||
+        existingRows.find((r) => r.assetId === el.assetId);
+
+      const size = sourceRow
+        ? { ...sourceRow.size }
+        : { id: `custom-${Math.round(el.wMm)}x${Math.round(el.hMm)}`, wMm: el.wMm, hMm: el.hMm };
+
+      addedRows.push({
+        id: newRowId,
+        assetId: el.assetId,
+        size,
+        qty: 1,
+        fillPage: false,
+        crop: sourceRow ? Boolean(sourceRow.crop) : false,
+      });
+    }
+
+    if (addedRows.length > 0) {
+      const updatedRows = [...existingRows, ...addedRows];
+      const updatedBlock: Block = {
+        ...block,
+        assetIds: Array.from(new Set(updatedRows.map((r) => r.assetId))),
+        rows: updatedRows,
+        generatedSig: '',
+      };
+
+      const { wMm: pageWMm, hMm: pageHMm } = getPageDimensionsMm(targetPage);
+      const effectiveMargin = activeJob.settings.borderless
+        ? 0
+        : (activeJob.settings.marginMm ?? 6.35);
+
+      const ctx: BlockCtx = {
+        paperId: targetPage.paperId,
+        orientation: targetPage.orientation,
+        pageWMm,
+        pageHMm,
+        marginMm: effectiveMargin,
+        gapMm: activeJob.settings.gapMm,
+        assetsById: Object.fromEntries(useSessionStore.getState().assets.map((a) => [a.id, a])),
+      };
+
+      const newPages = generateBlockPages(updatedBlock, ctx);
+      updatedBlock.generatedSig = blockSignature(newPages);
+
+      const firstIndex = activeJob.pages.findIndex((p) => p.blockId === block.id);
+      const pagesBefore = firstIndex === -1
+        ? activeJob.pages.filter((p) => p.blockId !== block.id)
+        : activeJob.pages.slice(0, firstIndex).filter((p) => p.blockId !== block.id);
+      const pagesAfter = firstIndex === -1
+        ? []
+        : activeJob.pages.slice(firstIndex).filter((p) => p.blockId !== block.id);
+      const finalPages = [...pagesBefore, ...newPages, ...pagesAfter];
+
+      useSessionStore.setState((s) => ({
+        jobs: s.jobs.map((j) =>
+          j.id === activeJob.id
+            ? {
+                ...j,
+                blocks: (j.blocks || []).map((b) => (b.id === block.id ? updatedBlock : b)),
+                pages: finalPages,
+              }
+            : j
+        ),
+      }));
+
+      const createdEls = newPages.flatMap((p) => p.elements).filter((el) => newRowIds.includes(el.rowId || ''));
+      if (createdEls.length > 0) {
+        const firstEl = createdEls[0];
+        const pageWithEl = newPages.find((p) => p.elements.some((e) => e.id === firstEl.id));
+        if (pageWithEl) {
+          setActivePage(pageWithEl.id);
+          if (createdEls.length === 1) {
+            useUiStore.getState().select({ pageId: pageWithEl.id, elementId: firstEl.id });
+          } else {
+            setSelection(pageWithEl.id, createdEls.map((e) => e.id));
+          }
+        }
+      }
+      return true;
+    }
+  }
 
   inAppClipboard.pasteCount += 1;
   const shiftMm = inAppClipboard.pasteCount * 5;

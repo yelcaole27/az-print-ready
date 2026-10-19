@@ -1,10 +1,18 @@
 import { create } from 'zustand';
 import { nanoid } from 'nanoid';
-import { Session, Job, Page, PageElement, ImageAsset, Unit, Settings, Block, BlockKind, SheetRow } from '@/types';
+import { Session, Job, Page, PageElement, ImageAsset, Unit, Settings, Block, BlockKind, SheetRow, PictureTarget } from '@/types';
 import { getPageDimensionsMm, clampToPage } from '@/lib/pageGeometry';
 import { useUiStore } from '@/store/useUiStore';
 import { BlockCtx, generateBlockPages, blockSignature } from '@/lib/blocks';
-import { printableRect } from '@/lib/packing';
+import { printableRect, findSpot, Rect } from '@/lib/packing';
+import {
+  isPageStayPut,
+  applyStayPutVariantSizeOnPage,
+  applyStayPutQuantityOnPage,
+  applyStayPutFillPageOnPage,
+  applyStayPutGeometryChangeOnPage,
+  placeOverflowElements,
+} from '@/lib/stayPut';
 
 interface SessionState extends Session {
   history: Record<string, { past: Job[]; future: Job[] }>;
@@ -79,7 +87,6 @@ interface SessionState extends Session {
   sendToBack: (jobId: string, pageId: string, elementId: string) => void;
   clearElements: (jobId: string) => void;
 
-  hasManualEdits: (jobId: string) => boolean;
   addBlocks: (
     jobId: string,
     specs: {
@@ -99,43 +106,43 @@ interface SessionState extends Session {
       >
     >,
     opts?: { force?: boolean }
-  ) => 'ok' | 'needs-confirm';
+  ) => 'ok';
   removeBlock: (jobId: string, blockId: string) => void;
   relayoutAll: (
     jobId: string,
     opts?: { force?: boolean }
-  ) => 'ok' | 'needs-confirm';
+  ) => 'ok';
 
   setBorderless: (jobId: string, borderless: boolean) => void;
   setPictureSize: (
     jobId: string,
-    assetId: string | string[],
+    target: PictureTarget,
     spec:
       | { mode: 'default' }
       | { mode: 'size'; size: { id: string; wMm: number; hMm: number } }
       | { mode: 'fill' }
       | { mode: 'width' },
     opts?: { force?: boolean }
-  ) => 'ok' | 'needs-confirm' | 'free' | 'not-found';
+  ) => 'ok' | 'free' | 'not-found';
   setPictureQty: (
     jobId: string,
-    assetId: string | string[],
+    target: PictureTarget,
     qty: number,
     opts?: { force?: boolean }
-  ) => 'ok' | 'needs-confirm';
+  ) => 'ok';
   setPictureFillPage: (
     jobId: string,
-    assetId: string | string[],
+    target: PictureTarget,
     value: boolean,
     opts?: { force?: boolean }
-  ) => 'ok' | 'needs-confirm';
+  ) => 'ok';
   setPictureSizeAndQty: (
     jobId: string,
-    assetId: string | string[],
+    target: PictureTarget,
     size: { id: string; wMm: number; hMm: number },
     qty: number,
     opts?: { force?: boolean }
-  ) => 'ok' | 'needs-confirm' | 'not-found';
+  ) => 'ok' | 'not-found';
 
   addAssets: (newAssets: ImageAsset[], jobId?: string) => void;
   discardAssets: (ids: string[]) => void;
@@ -217,33 +224,82 @@ function relayoutJobBlocks(job: Job, ctx: BlockCtx): Job {
 
   const remainingBlocks = blocks.filter((b) => activeBlockIds.has(b.id));
 
-  const generatedMap = new Map<string, { block: Block; pages: Page[] }>();
+  // A block is clean if none of its pages are in stay-put mode
+  const cleanBlockIds = new Set<string>();
   for (const block of remainingBlocks) {
-    const newPages = generateBlockPages(block, ctx);
-    const updatedBlock: Block = {
-      ...block,
-      generatedSig: blockSignature(newPages),
-    };
-    generatedMap.set(block.id, { block: updatedBlock, pages: newPages });
+    const bPages = job.pages.filter((p) => p.blockId === block.id);
+    const hasStayPut = bPages.some((p) => isPageStayPut(p, job));
+    if (!hasStayPut) {
+      cleanBlockIds.add(block.id);
+    }
   }
 
-  const reconstructedPages: Page[] = [];
+  const generatedMap = new Map<string, { block: Block; pages: Page[] }>();
+  for (const block of remainingBlocks) {
+    if (cleanBlockIds.has(block.id)) {
+      const newPages = generateBlockPages(block, ctx);
+      const updatedBlock: Block = {
+        ...block,
+        generatedSig: blockSignature(newPages),
+      };
+      generatedMap.set(block.id, { block: updatedBlock, pages: newPages });
+    }
+  }
+
+  let reconstructedPages: Page[] = [];
   const insertedBlockIds = new Set<string>();
+  const pRect = printableRect(ctx.pageWMm, ctx.pageHMm, ctx.marginMm);
 
   for (const page of job.pages) {
-    if (!page.blockId) {
+    if (page.elements.length === 0) {
       reconstructedPages.push({
         ...page,
         paperId: ctx.paperId,
         orientation: ctx.orientation,
+        elements: [],
       });
-    } else {
+      continue;
+    }
+
+    if (page.blockId && cleanBlockIds.has(page.blockId)) {
       if (!insertedBlockIds.has(page.blockId)) {
         insertedBlockIds.add(page.blockId);
         const gen = generatedMap.get(page.blockId);
         if (gen) {
           reconstructedPages.push(...gen.pages);
         }
+      }
+    } else {
+      // Stay-put page: preserve relative position (center fraction) and exact size in mm
+      const oldDimensions = getPageDimensionsMm(page);
+      const newDimensions = { wMm: ctx.pageWMm, hMm: ctx.pageHMm };
+      const { placedElements, overflowElements } = applyStayPutGeometryChangeOnPage({
+        page,
+        oldDimensions,
+        newDimensions,
+        pRect,
+        gapMm: ctx.gapMm,
+      });
+
+      const updatedPage: Page = {
+        ...page,
+        paperId: ctx.paperId,
+        orientation: ctx.orientation,
+        elements: placedElements,
+        stayPut: true,
+      };
+      reconstructedPages.push(updatedPage);
+
+      if (overflowElements.length > 0) {
+        reconstructedPages = placeOverflowElements(
+          overflowElements,
+          reconstructedPages,
+          ctx.paperId,
+          ctx.orientation,
+          ctx.marginMm,
+          ctx.gapMm,
+          reconstructedPages.length - 1
+        );
       }
     }
   }
@@ -293,6 +349,19 @@ function checkAndClearSelection() {
       setSelection(selectedPageId, existingIds);
     }
   }
+}
+
+function parsePictureTarget(target: PictureTarget): { assetIds: string[]; rowIds?: string[] } {
+  if (typeof target === 'string') {
+    return { assetIds: [target] };
+  }
+  if (Array.isArray(target)) {
+    return { assetIds: target };
+  }
+  return {
+    assetIds: target.assetIds || [],
+    rowIds: target.rowIds,
+  };
 }
 
 function revokeAssetUrls(asset: ImageAsset) {
@@ -714,6 +783,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
             if (p.id !== pageId) return p;
             return {
               ...p,
+              stayPut: true,
               elements: [...p.elements, element],
             };
           }),
@@ -723,13 +793,129 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   removeElement: (jobId: string, pageId: string, elementId: string) => {
-    get().commit(jobId);
-    set((state) => ({
-      jobs: state.jobs.map((job) => {
-        if (job.id !== jobId) return job;
+    const state = get();
+    const job = state.jobs.find((j) => j.id === jobId);
+    if (!job) return;
+    const page = job.pages.find((p) => p.id === pageId);
+    if (!page) return;
+    const element = page.elements.find((el) => el.id === elementId);
+    if (!element) return;
+
+    const block = job.blocks?.find((b) => b.id === page.blockId);
+    const isStayPut = isPageStayPut(page, job);
+
+    if (isStayPut) {
+      state.commit(jobId);
+      const nextElements = page.elements.filter((el) => el.id !== elementId);
+      let updatedBlocks = job.blocks || [];
+      if (block && block.kind === 'sheet') {
+        const rowId = element.rowId;
+        const nextRows = (block.rows || []).map((r) => {
+          const matches = rowId ? r.id === rowId : r.assetId === element.assetId;
+          if (!matches) return r;
+          const newQty = Math.max(0, (r.qty || 1) - 1);
+          return { ...r, qty: newQty };
+        }).filter((r) => r.qty > 0);
+        updatedBlocks = updatedBlocks.map((b) =>
+          b.id === block.id ? { ...b, rows: nextRows } : b
+        );
+      }
+      set((s) => ({
+        jobs: s.jobs.map((j) =>
+          j.id === jobId
+            ? {
+                ...j,
+                blocks: updatedBlocks,
+                pages: j.pages.map((p) =>
+                  p.id === pageId
+                    ? { ...p, elements: nextElements, stayPut: true }
+                    : p
+                ),
+              }
+            : j
+        ),
+      }));
+      useUiStore.getState().clearSelection();
+      return;
+    }
+
+    if (block && block.kind === 'sheet') {
+      state.commit(jobId);
+      const rowId = element.rowId;
+      const nextRows = (block.rows || []).map((r) => ({ ...r, id: r.id || nanoid() }));
+      const targetIdx = nextRows.findIndex((r) => (rowId ? r.id === rowId : r.assetId === element.assetId));
+
+      if (targetIdx >= 0) {
+        const targetRow = nextRows[targetIdx];
+        const newQty = targetRow.fillPage ? 0 : targetRow.qty - 1;
+        if (newQty <= 0) {
+          nextRows.splice(targetIdx, 1);
+        } else {
+          nextRows[targetIdx] = { ...targetRow, qty: newQty };
+        }
+      }
+
+      const ctx = ctxForJob(job, state.assets);
+      if (nextRows.length === 0) {
+        const newBlocks = (job.blocks || []).filter((b) => b.id !== block.id);
+        let newPages = job.pages.filter((p) => p.blockId !== block.id);
+        if (newPages.length === 0) {
+          newPages = [
+            {
+              id: nanoid(),
+              paperId: page.paperId,
+              orientation: page.orientation,
+              elements: [],
+            },
+          ];
+        }
+        set((s) => ({
+          jobs: s.jobs.map((j) =>
+            j.id === jobId ? { ...j, blocks: newBlocks, pages: newPages } : j
+          ),
+        }));
+      } else {
+        const updatedBlock: Block = {
+          ...block,
+          assetIds: Array.from(new Set(nextRows.map((r) => r.assetId))),
+          rows: nextRows,
+          generatedSig: '',
+        };
+        const newPages = generateBlockPages(updatedBlock, ctx);
+        updatedBlock.generatedSig = blockSignature(newPages);
+
+        const firstIndex = job.pages.findIndex((p) => p.blockId === block.id);
+        const pagesBefore = firstIndex === -1
+          ? job.pages.filter((p) => p.blockId !== block.id)
+          : job.pages.slice(0, firstIndex).filter((p) => p.blockId !== block.id);
+        const pagesAfter = firstIndex === -1
+          ? []
+          : job.pages.slice(firstIndex).filter((p) => p.blockId !== block.id);
+        const finalPages = [...pagesBefore, ...newPages, ...pagesAfter];
+
+        set((s) => ({
+          jobs: s.jobs.map((j) =>
+            j.id === jobId
+              ? {
+                  ...j,
+                  blocks: (j.blocks || []).map((b) => (b.id === block.id ? updatedBlock : b)),
+                  pages: finalPages,
+                }
+              : j
+          ),
+        }));
+      }
+      useUiStore.getState().clearSelection();
+      return;
+    }
+
+    state.commit(jobId);
+    set((s) => ({
+      jobs: s.jobs.map((j) => {
+        if (j.id !== jobId) return j;
         return {
-          ...job,
-          pages: job.pages.map((p) => {
+          ...j,
+          pages: j.pages.map((p) => {
             if (p.id !== pageId) return p;
             return {
               ...p,
@@ -743,14 +929,99 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   removeElements: (jobId: string, pageId: string, elementIds: string[]) => {
     if (!elementIds || elementIds.length === 0) return;
-    get().commit(jobId);
+    const state = get();
+    const job = state.jobs.find((j) => j.id === jobId);
+    if (!job) return;
+    const page = job.pages.find((p) => p.id === pageId);
+    if (!page) return;
+
+    const block = job.blocks?.find((b) => b.id === page.blockId);
+    if (block && block.kind === 'sheet') {
+      state.commit(jobId);
+      const elementsToRemove = page.elements.filter((el) => elementIds.includes(el.id));
+      const countsByRowId = new Map<string, number>();
+      const countsByAssetId = new Map<string, number>();
+
+      for (const el of elementsToRemove) {
+        if (el.rowId) {
+          countsByRowId.set(el.rowId, (countsByRowId.get(el.rowId) || 0) + 1);
+        } else if (el.assetId) {
+          countsByAssetId.set(el.assetId, (countsByAssetId.get(el.assetId) || 0) + 1);
+        }
+      }
+
+      let nextRows = (block.rows || []).map((r) => ({ ...r, id: r.id || nanoid() }));
+      nextRows = nextRows
+        .map((r) => {
+          const count = countsByRowId.get(r.id || '') || countsByAssetId.get(r.assetId) || 0;
+          if (count === 0) return r;
+          const newQty = r.fillPage ? 0 : r.qty - count;
+          return { ...r, qty: newQty };
+        })
+        .filter((r) => r.qty > 0);
+
+      const ctx = ctxForJob(job, state.assets);
+      if (nextRows.length === 0) {
+        const newBlocks = (job.blocks || []).filter((b) => b.id !== block.id);
+        let newPages = job.pages.filter((p) => p.blockId !== block.id);
+        if (newPages.length === 0) {
+          newPages = [
+            {
+              id: nanoid(),
+              paperId: page.paperId,
+              orientation: page.orientation,
+              elements: [],
+            },
+          ];
+        }
+        set((s) => ({
+          jobs: s.jobs.map((j) =>
+            j.id === jobId ? { ...j, blocks: newBlocks, pages: newPages } : j
+          ),
+        }));
+      } else {
+        const updatedBlock: Block = {
+          ...block,
+          assetIds: Array.from(new Set(nextRows.map((r) => r.assetId))),
+          rows: nextRows,
+          generatedSig: '',
+        };
+        const newPages = generateBlockPages(updatedBlock, ctx);
+        updatedBlock.generatedSig = blockSignature(newPages);
+
+        const firstIndex = job.pages.findIndex((p) => p.blockId === block.id);
+        const pagesBefore = firstIndex === -1
+          ? job.pages.filter((p) => p.blockId !== block.id)
+          : job.pages.slice(0, firstIndex).filter((p) => p.blockId !== block.id);
+        const pagesAfter = firstIndex === -1
+          ? []
+          : job.pages.slice(firstIndex).filter((p) => p.blockId !== block.id);
+        const finalPages = [...pagesBefore, ...newPages, ...pagesAfter];
+
+        set((s) => ({
+          jobs: s.jobs.map((j) =>
+            j.id === jobId
+              ? {
+                  ...j,
+                  blocks: (j.blocks || []).map((b) => (b.id === block.id ? updatedBlock : b)),
+                  pages: finalPages,
+                }
+              : j
+          ),
+        }));
+      }
+      useUiStore.getState().clearSelection();
+      return;
+    }
+
+    state.commit(jobId);
     const idSet = new Set(elementIds);
-    set((state) => ({
-      jobs: state.jobs.map((job) => {
-        if (job.id !== jobId) return job;
+    set((s) => ({
+      jobs: s.jobs.map((j) => {
+        if (j.id !== jobId) return j;
         return {
-          ...job,
-          pages: job.pages.map((p) => {
+          ...j,
+          pages: j.pages.map((p) => {
             if (p.id !== pageId) return p;
             return {
               ...p,
@@ -818,6 +1089,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
             if (p.id !== pageId) return p;
             return {
               ...p,
+              stayPut: true,
               elements: p.elements.map((el) => {
                 if (!idSet.has(el.id) || el.sliceIndex) return el;
                 return {
@@ -904,6 +1176,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
             if (p.id !== pageId) return p;
             return {
               ...p,
+              stayPut: true,
               elements: p.elements.map((el) => {
                 if (!targetIdSet.has(el.id)) return el;
                 return {
@@ -930,6 +1203,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
             if (p.id !== pageId) return p;
             return {
               ...p,
+              stayPut: true,
               elements: p.elements.map((el) => {
                 if (el.id !== elementId) return el;
                 const oldRotation = el.rotation || 0;
@@ -980,6 +1254,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
             if (p.id !== pageId) return p;
             return {
               ...p,
+              stayPut: true,
               elements: p.elements.map((el) => {
                 if (el.id !== elementId) return el;
                 const next = { ...el, ...partial };
@@ -1015,6 +1290,192 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     if (!page) return null;
     const element = page.elements.find((el) => el.id === elementId);
     if (!element) return null;
+
+    const block = job.blocks?.find((b) => b.id === page.blockId);
+    const isStayPut = isPageStayPut(page, job);
+
+    if (isStayPut) {
+      state.commit(jobId);
+      const { wMm, hMm } = getPageDimensionsMm(page);
+      const effectiveMargin = job.settings.borderless ? 0 : job.settings.marginMm;
+      const pRect = printableRect(wMm, hMm, effectiveMargin);
+      const occupied: Rect[] = page.elements.map((el) => ({
+        x: el.xMm,
+        y: el.yMm,
+        w: el.wMm,
+        h: el.hMm,
+      }));
+      let spot = findSpot(occupied, element.wMm, element.hMm, pRect, job.settings.gapMm, {
+        x: element.xMm + 5,
+        y: element.yMm + 5,
+      });
+      if (!spot) {
+        spot = findSpot(occupied, element.wMm, element.hMm, pRect, job.settings.gapMm);
+      }
+      const newElId = nanoid();
+      const newEl: PageElement = {
+        ...element,
+        id: newElId,
+        xMm: spot ? spot.x : Math.min(element.xMm + 5, pRect.x + pRect.w - element.wMm),
+        yMm: spot ? spot.y : Math.min(element.yMm + 5, pRect.y + pRect.h - element.hMm),
+      };
+
+      let updatedBlocks = job.blocks || [];
+      if (block && block.kind === 'sheet') {
+        const rowId = element.rowId;
+        const nextRows = (block.rows || []).map((r) => {
+          const matches = rowId ? r.id === rowId : r.assetId === element.assetId;
+          return matches ? { ...r, qty: (r.qty || 1) + 1 } : r;
+        });
+        updatedBlocks = updatedBlocks.map((b) =>
+          b.id === block.id ? { ...b, rows: nextRows } : b
+        );
+      }
+
+      set((s) => ({
+        jobs: s.jobs.map((j) =>
+          j.id === jobId
+            ? {
+                ...j,
+                blocks: updatedBlocks,
+                pages: j.pages.map((p) =>
+                  p.id === pageId
+                    ? { ...p, elements: [...p.elements, newEl], stayPut: true }
+                    : p
+                ),
+              }
+            : j
+        ),
+      }));
+
+      useUiStore.getState().setActivePage(page.id);
+      useUiStore.getState().select({ pageId: page.id, elementId: newElId });
+      if (element.assetId) {
+        useUiStore.getState().setActiveAssetId(element.assetId);
+      }
+      return newElId;
+    }
+
+    if (block && block.kind === 'sheet' && element.assetId) {
+      state.commit(jobId);
+      const existingRows = (block.rows || []).map((r) => ({ ...r, id: r.id || nanoid() }));
+      const sourceRow = existingRows.find((r) => r.id === element.rowId) ||
+        existingRows.find((r) => r.assetId === element.assetId);
+
+      const newRowId = nanoid();
+      const newRow: SheetRow = {
+        id: newRowId,
+        assetId: element.assetId,
+        size: sourceRow
+          ? { ...sourceRow.size }
+          : { id: `custom-${Math.round(element.wMm)}x${Math.round(element.hMm)}`, wMm: element.wMm, hMm: element.hMm },
+        qty: 1,
+        fillPage: false,
+        crop: sourceRow ? Boolean(sourceRow.crop) : false,
+      };
+
+      const updatedRows = [...existingRows, newRow];
+      const updatedBlock: Block = {
+        ...block,
+        assetIds: Array.from(new Set(updatedRows.map((r) => r.assetId))),
+        rows: updatedRows,
+        generatedSig: '',
+      };
+
+      const ctx = ctxForJob(job, state.assets);
+      const newPages = generateBlockPages(updatedBlock, ctx);
+      updatedBlock.generatedSig = blockSignature(newPages);
+
+      const firstIndex = job.pages.findIndex((p) => p.blockId === block.id);
+      const pagesBefore = firstIndex === -1
+        ? job.pages.filter((p) => p.blockId !== block.id)
+        : job.pages.slice(0, firstIndex).filter((p) => p.blockId !== block.id);
+      const pagesAfter = firstIndex === -1
+        ? []
+        : job.pages.slice(firstIndex).filter((p) => p.blockId !== block.id);
+      const finalPages = [...pagesBefore, ...newPages, ...pagesAfter];
+
+      set((s) => ({
+        jobs: s.jobs.map((j) =>
+          j.id === jobId
+            ? {
+                ...j,
+                blocks: (j.blocks || []).map((b) => (b.id === block.id ? updatedBlock : b)),
+                pages: finalPages,
+              }
+            : j
+        ),
+      }));
+
+      const createdElement = newPages.flatMap((p) => p.elements).find((el) => el.rowId === newRowId);
+      if (createdElement) {
+        const targetPage = newPages.find((p) => p.elements.some((el) => el.id === createdElement.id));
+        if (targetPage) {
+          useUiStore.getState().setActivePage(targetPage.id);
+          useUiStore.getState().select({ pageId: targetPage.id, elementId: createdElement.id });
+          useUiStore.getState().setActiveAssetId(element.assetId);
+        }
+        return createdElement.id;
+      }
+      return null;
+    }
+
+    if (block && block.kind === 'fit' && element.assetId) {
+      state.commit(jobId);
+      const row1Id = nanoid();
+      const row2Id = nanoid();
+      const wMm = Math.round(element.wMm * 100) / 100;
+      const hMm = Math.round(element.hMm * 100) / 100;
+      const customSize = { id: `custom-${Math.round(wMm)}x${Math.round(hMm)}`, wMm, hMm };
+
+      const sheetBlock: Block = {
+        id: block.id,
+        kind: 'sheet',
+        assetIds: [element.assetId],
+        rows: [
+          { id: row1Id, assetId: element.assetId, size: customSize, qty: 1, fillPage: false, crop: false },
+          { id: row2Id, assetId: element.assetId, size: customSize, qty: 1, fillPage: false, crop: false },
+        ],
+        generatedSig: '',
+      };
+
+      const ctx = ctxForJob(job, state.assets);
+      const newPages = generateBlockPages(sheetBlock, ctx);
+      sheetBlock.generatedSig = blockSignature(newPages);
+
+      const firstIndex = job.pages.findIndex((p) => p.blockId === block.id);
+      const pagesBefore = firstIndex === -1
+        ? job.pages.filter((p) => p.blockId !== block.id)
+        : job.pages.slice(0, firstIndex).filter((p) => p.blockId !== block.id);
+      const pagesAfter = firstIndex === -1
+        ? []
+        : job.pages.slice(firstIndex).filter((p) => p.blockId !== block.id);
+      const finalPages = [...pagesBefore, ...newPages, ...pagesAfter];
+
+      set((s) => ({
+        jobs: s.jobs.map((j) =>
+          j.id === jobId
+            ? {
+                ...j,
+                blocks: (j.blocks || []).map((b) => (b.id === block.id ? sheetBlock : b)),
+                pages: finalPages,
+              }
+            : j
+        ),
+      }));
+
+      const createdElement = newPages.flatMap((p) => p.elements).find((el) => el.rowId === row2Id);
+      if (createdElement) {
+        const targetPage = newPages.find((p) => p.elements.some((el) => el.id === createdElement.id));
+        if (targetPage) {
+          useUiStore.getState().setActivePage(targetPage.id);
+          useUiStore.getState().select({ pageId: targetPage.id, elementId: createdElement.id });
+          useUiStore.getState().setActiveAssetId(element.assetId);
+        }
+        return createdElement.id;
+      }
+      return null;
+    }
 
     state.commit(jobId);
 
@@ -1101,12 +1562,14 @@ export const useSessionStore = create<SessionState>((set, get) => ({
             if (p.id === fromPageId) {
               return {
                 ...p,
+                stayPut: true,
                 elements: p.elements.filter((el) => el.id !== elementId),
               };
             }
             if (p.id === toPageId) {
               return {
                 ...p,
+                stayPut: true,
                 elements: [...p.elements, movedElement],
               };
             }
@@ -1175,6 +1638,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       paperId,
       orientation,
       elements: [movedElement],
+      stayPut: true,
     };
 
     set((s) => ({
@@ -1187,6 +1651,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
               if (p.id === fromPageId) {
                 return {
                   ...p,
+                  stayPut: true,
                   elements: p.elements.filter((el) => el.id !== elementId),
                 };
               }
@@ -1324,19 +1789,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     checkAndClearSelection();
   },
 
-  hasManualEdits: (jobId: string) => {
-    const job = get().jobs.find((j) => j.id === jobId);
-    if (!job || !job.blocks) return false;
-    for (const block of job.blocks) {
-      const pages = job.pages.filter((p) => p.blockId === block.id);
-      if (pages.length === 0) continue;
-      if (blockSignature(pages) !== block.generatedSig) {
-        return true;
-      }
-    }
-    return false;
-  },
-
   addBlocks: (
     jobId: string,
     specs: {
@@ -1446,14 +1898,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const block = job.blocks?.find((b) => b.id === blockId);
     if (!block) return 'ok';
 
-    const existingPages = job.pages.filter((p) => p.blockId === blockId);
-    if (existingPages.length > 0) {
-      const sig = blockSignature(existingPages);
-      if (sig !== block.generatedSig && !opts?.force) {
-        return 'needs-confirm';
-      }
-    }
-
     get().commit(jobId);
 
     const updatedBlock: Block = {
@@ -1527,10 +1971,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const job = state.jobs.find((j) => j.id === jobId);
     if (!job) return 'ok';
 
-    if (!opts?.force && state.hasManualEdits(jobId)) {
-      return 'needs-confirm';
-    }
-
     get().commit(jobId);
     set((s) => {
       const targetJob = s.jobs.find((j) => j.id === jobId);
@@ -1549,11 +1989,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const state = get();
     const job = state.jobs.find((j) => j.id === jobId);
     if (!job) return;
-
-    if (state.hasManualEdits(jobId)) {
-      const confirmed = window.confirm('Reset your manual changes?');
-      if (!confirmed) return;
-    }
 
     get().commit(jobId);
     set((s) => {
@@ -1574,7 +2009,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   setPictureSize: (
     jobId: string,
-    assetId: string | string[],
+    target: PictureTarget,
     spec:
       | { mode: 'default' }
       | { mode: 'size'; size: { id: string; wMm: number; hMm: number } }
@@ -1586,30 +2021,32 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const job = state.jobs.find((j) => j.id === jobId);
     if (!job) return 'not-found';
 
-    const targetAssetIds = Array.isArray(assetId) ? assetId : [assetId];
-    if (targetAssetIds.length === 0) return 'ok';
-    const primaryAssetId = targetAssetIds[0];
+    const { assetIds: targetAssetIds, rowIds: targetRowIds } = parsePictureTarget(target);
+    if (targetAssetIds.length === 0 && (!targetRowIds || targetRowIds.length === 0)) return 'ok';
+    const primaryAssetId = targetAssetIds[0] || '';
 
-    const targetPage = job.pages.find((p) =>
-      p.elements.some((el) => targetAssetIds.includes(el.assetId || ''))
-    );
+    const targetPage =
+      job.pages.find((p) =>
+        p.elements.some((el) =>
+          (targetRowIds && targetRowIds.length > 0 && el.rowId && targetRowIds.includes(el.rowId)) ||
+          (el.assetId && targetAssetIds.includes(el.assetId))
+        )
+      ) ||
+      (useUiStore.getState().activePageId
+        ? job.pages.find((p) => p.id === useUiStore.getState().activePageId)
+        : undefined) ||
+      job.pages[0];
 
     const affectedBlockIds = new Set<string>();
     if (targetPage?.blockId) {
       affectedBlockIds.add(targetPage.blockId);
     }
     for (const b of job.blocks || []) {
-      if (b.assetIds.some((id) => targetAssetIds.includes(id))) {
+      if (
+        b.assetIds.some((id) => targetAssetIds.includes(id)) ||
+        (targetRowIds && targetRowIds.length > 0 && b.rows?.some((r) => r.id && targetRowIds.includes(r.id)))
+      ) {
         affectedBlockIds.add(b.id);
-      }
-    }
-
-    for (const bId of affectedBlockIds) {
-      const block = job.blocks.find((b) => b.id === bId);
-      if (!block) continue;
-      const bPages = job.pages.filter((p) => p.blockId === block.id);
-      if (blockSignature(bPages) !== block.generatedSig && !opts?.force) {
-        return 'needs-confirm';
       }
     }
 
@@ -1617,11 +2054,97 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const ctx = ctxForJob(job, state.assets);
 
     if (spec.mode === 'size') {
+      const isStayPut = targetPage && isPageStayPut(targetPage, job);
+      if (isStayPut && targetPage) {
+        const { wMm, hMm } = getPageDimensionsMm(targetPage);
+        const effectiveMargin = job.settings.borderless ? 0 : job.settings.marginMm;
+        const pRect = printableRect(wMm, hMm, effectiveMargin);
+
+        const { updatedElements, overflowElements } = applyStayPutVariantSizeOnPage({
+          page: targetPage,
+          targetAssetIds,
+          targetRowIds: targetRowIds || [],
+          newSize: spec.size,
+          pRect,
+          gapMm: job.settings.gapMm,
+        });
+
+        let updatedPages = job.pages.map((p) =>
+          p.id === targetPage.id
+            ? { ...p, elements: updatedElements, stayPut: true }
+            : p
+        );
+
+        if (overflowElements.length > 0) {
+          const startIdx = updatedPages.findIndex((p) => p.id === targetPage.id);
+          updatedPages = placeOverflowElements(
+            overflowElements,
+            updatedPages,
+            targetPage.paperId,
+            targetPage.orientation,
+            effectiveMargin,
+            job.settings.gapMm,
+            startIdx >= 0 ? startIdx : updatedPages.length - 1
+          );
+        }
+
+        let updatedBlocks = [...(job.blocks || [])];
+        if (targetPage.blockId) {
+          updatedBlocks = updatedBlocks.map((b) => {
+            if (b.id !== targetPage.blockId) return b;
+            const nextRows = (b.rows || []).map((r) => {
+              const matches =
+                targetRowIds && targetRowIds.length > 0
+                  ? targetRowIds.includes(r.id || '')
+                  : targetAssetIds.includes(r.assetId);
+              return matches ? { ...r, size: spec.size } : r;
+            });
+            return { ...b, rows: nextRows };
+          });
+        }
+
+        set((s) => ({
+          jobs: s.jobs.map((j) =>
+            j.id === jobId
+              ? {
+                  ...j,
+                  blocks: updatedBlocks,
+                  pages: updatedPages,
+                }
+              : j
+          ),
+        }));
+
+        const reselectedIds = updatedElements
+          .filter((el) =>
+            targetRowIds && targetRowIds.length > 0
+              ? targetRowIds.includes(el.rowId || '')
+              : el.assetId && targetAssetIds.includes(el.assetId)
+          )
+          .map((el) => el.id);
+
+        if (reselectedIds.length === 1) {
+          useUiStore.getState().setActivePage(targetPage.id);
+          useUiStore.getState().select({ pageId: targetPage.id, elementId: reselectedIds[0] });
+        } else if (reselectedIds.length > 1) {
+          useUiStore.getState().setActivePage(targetPage.id);
+          useUiStore.getState().setSelection(targetPage.id, reselectedIds);
+        }
+
+        return 'ok';
+      }
+
       const existingSheetBlock = targetPage?.blockId
         ? job.blocks.find((b) => b.id === targetPage.blockId && b.kind === 'sheet')
-        : (job.blocks || []).find((b) => b.kind === 'sheet' && b.assetIds.includes(primaryAssetId));
+        : (job.blocks || []).find((b) => b.kind === 'sheet');
 
-      const existingRows: SheetRow[] = existingSheetBlock?.rows ? [...existingSheetBlock.rows] : [];
+      if (existingSheetBlock?.id) {
+        affectedBlockIds.add(existingSheetBlock.id);
+      }
+
+      const existingRows: SheetRow[] = existingSheetBlock?.rows
+        ? existingSheetBlock.rows.map((r) => ({ ...r, id: r.id || nanoid() }))
+        : [];
 
       const pageElements = targetPage ? targetPage.elements : [];
       const pageAssetIds = Array.from(
@@ -1629,21 +2152,51 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       );
 
       const nextRows: SheetRow[] = [...existingRows];
-      for (const id of targetAssetIds) {
-        const rowIdx = nextRows.findIndex((r) => r.assetId === id);
-        if (rowIdx >= 0) {
-          nextRows[rowIdx] = {
-            ...nextRows[rowIdx],
-            size: spec.size,
-          };
-        } else {
-          nextRows.push({
-            assetId: id,
-            size: spec.size,
-            qty: 1,
-            fillPage: false,
-            crop: false,
-          });
+      if (targetRowIds && targetRowIds.length > 0) {
+        // Targeted by specific variant(s) on the canvas
+        for (const rId of targetRowIds) {
+          const rowIdx = nextRows.findIndex((r) => r.id === rId);
+          if (rowIdx >= 0) {
+            nextRows[rowIdx] = {
+              ...nextRows[rowIdx],
+              size: spec.size,
+            };
+          }
+        }
+      } else {
+        // Thumbnail clicked in PICTURES menu:
+        // Merge all variants of each target picture on that page into ONE variant with the new size!
+        for (const id of targetAssetIds) {
+          const matchingIndices: number[] = [];
+          for (let i = 0; i < nextRows.length; i++) {
+            if (nextRows[i].assetId === id) {
+              matchingIndices.push(i);
+            }
+          }
+          if (matchingIndices.length > 0) {
+            const firstIdx = matchingIndices[0];
+            const totalQty = matchingIndices.reduce((sum, idx) => sum + (nextRows[idx].qty || 1), 0);
+            const firstRow = nextRows[firstIdx];
+            for (let i = matchingIndices.length - 1; i > 0; i--) {
+              nextRows.splice(matchingIndices[i], 1);
+            }
+            nextRows[firstIdx] = {
+              ...firstRow,
+              size: spec.size,
+              qty: totalQty,
+              fillPage: false,
+              crop: false,
+            };
+          } else {
+            nextRows.push({
+              id: nanoid(),
+              assetId: id,
+              size: spec.size,
+              qty: 1,
+              fillPage: false,
+              crop: false,
+            });
+          }
         }
       }
 
@@ -1671,6 +2224,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
             }
           }
           nextRows.push({
+            id: nanoid(),
             assetId: id,
             size: { id: `custom-${Math.round(wMm)}x${Math.round(hMm)}`, wMm, hMm },
             qty: 1,
@@ -1754,7 +2308,23 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         ),
       }));
 
-      checkAndClearSelection();
+      if (targetRowIds && targetRowIds.length > 0) {
+        const matchingEls = newSheetPages.flatMap((p) => p.elements).filter((el) => targetRowIds.includes(el.rowId || ''));
+        if (matchingEls.length > 0) {
+          const firstEl = matchingEls[0];
+          const pageWithEl = newSheetPages.find((p) => p.elements.some((e) => e.id === firstEl.id));
+          if (pageWithEl) {
+            useUiStore.getState().setActivePage(pageWithEl.id);
+            if (matchingEls.length === 1) {
+              useUiStore.getState().select({ pageId: pageWithEl.id, elementId: firstEl.id });
+            } else {
+              useUiStore.getState().setSelection(pageWithEl.id, matchingEls.map((e) => e.id));
+            }
+          }
+        }
+      } else {
+        checkAndClearSelection();
+      }
       return 'ok';
     }
 
@@ -1901,7 +2471,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   setPictureQty: (
     jobId: string,
-    assetId: string | string[],
+    target: PictureTarget,
     qty: number,
     opts?: { force?: boolean }
   ) => {
@@ -1909,20 +2479,121 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const job = state.jobs.find((j) => j.id === jobId);
     if (!job) return 'ok';
 
-    const targetAssetIds = Array.isArray(assetId) ? assetId : [assetId];
+    const { assetIds: targetAssetIds, rowIds: targetRowIds } = parsePictureTarget(target);
     const clamped = Math.min(500, Math.max(1, Math.round(qty) || 1));
 
+    const targetPage =
+      job.pages.find((p) =>
+        p.elements.some((el) =>
+          (targetRowIds && targetRowIds.length > 0 && el.rowId && targetRowIds.includes(el.rowId)) ||
+          (el.assetId && targetAssetIds.includes(el.assetId))
+        )
+      ) ||
+      (useUiStore.getState().activePageId
+        ? job.pages.find((p) => p.id === useUiStore.getState().activePageId)
+        : undefined) ||
+      job.pages[0];
+
+    const isStayPut = targetPage && isPageStayPut(targetPage, job);
+    if (isStayPut && targetPage) {
+      state.commit(jobId);
+      const { wMm, hMm } = getPageDimensionsMm(targetPage);
+      const effectiveMargin = job.settings.borderless ? 0 : job.settings.marginMm;
+      const pRect = printableRect(wMm, hMm, effectiveMargin);
+
+      const targetEl = targetPage.elements.find((el) =>
+        targetRowIds && targetRowIds.length > 0
+          ? targetRowIds.includes(el.rowId || '')
+          : el.assetId && targetAssetIds.includes(el.assetId)
+      );
+      const itemW = targetEl ? targetEl.wMm : 50;
+      const itemH = targetEl ? targetEl.hMm : 50;
+
+      const { updatedElements, overflowElements } = applyStayPutQuantityOnPage({
+        page: targetPage,
+        targetAssetIds,
+        targetRowIds: targetRowIds || [],
+        newQty: clamped,
+        itemSize: { id: '', wMm: itemW, hMm: itemH },
+        pRect,
+        gapMm: job.settings.gapMm,
+      });
+
+      let updatedPages = job.pages.map((p) =>
+        p.id === targetPage.id
+          ? { ...p, elements: updatedElements, stayPut: true }
+          : p
+      );
+
+      if (overflowElements.length > 0) {
+        const startIdx = updatedPages.findIndex((p) => p.id === targetPage.id);
+        updatedPages = placeOverflowElements(
+          overflowElements,
+          updatedPages,
+          targetPage.paperId,
+          targetPage.orientation,
+          effectiveMargin,
+          job.settings.gapMm,
+          startIdx >= 0 ? startIdx : updatedPages.length - 1
+        );
+      }
+
+      let updatedBlocks = [...(job.blocks || [])];
+      if (targetPage.blockId) {
+        updatedBlocks = updatedBlocks.map((b) => {
+          if (b.id !== targetPage.blockId) return b;
+          const nextRows = (b.rows || []).map((r) => {
+            const matches =
+              targetRowIds && targetRowIds.length > 0
+                ? targetRowIds.includes(r.id || '')
+                : targetAssetIds.includes(r.assetId);
+            return matches ? { ...r, qty: clamped, fillPage: false } : r;
+          });
+          return { ...b, rows: nextRows };
+        });
+      }
+
+      set((s) => ({
+        jobs: s.jobs.map((j) =>
+          j.id === jobId
+            ? {
+                ...j,
+                blocks: updatedBlocks,
+                pages: updatedPages,
+              }
+            : j
+        ),
+      }));
+
+      const reselectedIds = updatedElements
+        .filter((el) =>
+          targetRowIds && targetRowIds.length > 0
+            ? targetRowIds.includes(el.rowId || '')
+            : el.assetId && targetAssetIds.includes(el.assetId)
+        )
+        .map((el) => el.id);
+
+      if (reselectedIds.length === 1) {
+        useUiStore.getState().setActivePage(targetPage.id);
+        useUiStore.getState().select({ pageId: targetPage.id, elementId: reselectedIds[0] });
+      } else if (reselectedIds.length > 1) {
+        useUiStore.getState().setActivePage(targetPage.id);
+        useUiStore.getState().setSelection(targetPage.id, reselectedIds);
+      }
+
+      return 'ok';
+    }
+
     const affectedBlocks = (job.blocks || []).filter(
-      (b) => b.kind === 'sheet' && b.rows?.some((r) => targetAssetIds.includes(r.assetId))
+      (b) =>
+        b.kind === 'sheet' &&
+        b.rows?.some((r) =>
+          targetRowIds && targetRowIds.length > 0
+            ? targetRowIds.includes(r.id || '')
+            : targetAssetIds.includes(r.assetId)
+        )
     );
     if (affectedBlocks.length === 0) return 'ok';
-
-    for (const b of affectedBlocks) {
-      const pages = job.pages.filter((p) => p.blockId === b.id);
-      if (blockSignature(pages) !== b.generatedSig && !opts?.force) {
-        return 'needs-confirm';
-      }
-    }
 
     state.commit(jobId);
 
@@ -1931,11 +2602,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     let currentPages = [...job.pages];
 
     for (const block of affectedBlocks) {
-      const nextRows = (block.rows || []).map((row) =>
-        targetAssetIds.includes(row.assetId)
-          ? { ...row, qty: clamped, fillPage: false }
-          : row
-      );
+      const nextRows = (block.rows || []).map((row) => {
+        const matches =
+          targetRowIds && targetRowIds.length > 0
+            ? targetRowIds.includes(row.id || '')
+            : targetAssetIds.includes(row.assetId);
+        return matches ? { ...row, qty: clamped, fillPage: false } : row;
+      });
       const updatedBlock: Block = {
         ...block,
         rows: nextRows,
@@ -1969,12 +2642,28 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       ),
     }));
 
+    if (targetRowIds && targetRowIds.length > 0) {
+      const matchingEls = currentPages.flatMap((p) => p.elements).filter((el) => targetRowIds.includes(el.rowId || ''));
+      if (matchingEls.length > 0) {
+        const firstEl = matchingEls[0];
+        const pageWithEl = currentPages.find((p) => p.elements.some((e) => e.id === firstEl.id));
+        if (pageWithEl) {
+          useUiStore.getState().setActivePage(pageWithEl.id);
+          if (matchingEls.length === 1) {
+            useUiStore.getState().select({ pageId: pageWithEl.id, elementId: firstEl.id });
+          } else {
+            useUiStore.getState().setSelection(pageWithEl.id, matchingEls.map((e) => e.id));
+          }
+        }
+      }
+    }
+
     return 'ok';
   },
 
   setPictureFillPage: (
     jobId: string,
-    assetId: string | string[],
+    target: PictureTarget,
     value: boolean,
     opts?: { force?: boolean }
   ) => {
@@ -1982,19 +2671,107 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const job = state.jobs.find((j) => j.id === jobId);
     if (!job) return 'ok';
 
-    const targetAssetIds = Array.isArray(assetId) ? assetId : [assetId];
+    const { assetIds: targetAssetIds, rowIds: targetRowIds } = parsePictureTarget(target);
+
+    const targetPage =
+      job.pages.find((p) =>
+        p.elements.some((el) =>
+          (targetRowIds && targetRowIds.length > 0 && el.rowId && targetRowIds.includes(el.rowId)) ||
+          (el.assetId && targetAssetIds.includes(el.assetId))
+        )
+      ) ||
+      (useUiStore.getState().activePageId
+        ? job.pages.find((p) => p.id === useUiStore.getState().activePageId)
+        : undefined) ||
+      job.pages[0];
+
+    const isStayPut = targetPage && isPageStayPut(targetPage, job);
+    if (isStayPut && targetPage) {
+      state.commit(jobId);
+      if (value) {
+        const { wMm, hMm } = getPageDimensionsMm(targetPage);
+        const effectiveMargin = job.settings.borderless ? 0 : job.settings.marginMm;
+        const pRect = printableRect(wMm, hMm, effectiveMargin);
+
+        const targetEl = targetPage.elements.find((el) =>
+          targetRowIds && targetRowIds.length > 0
+            ? targetRowIds.includes(el.rowId || '')
+            : el.assetId && targetAssetIds.includes(el.assetId)
+        );
+        const itemW = targetEl ? targetEl.wMm : 50;
+        const itemH = targetEl ? targetEl.hMm : 50;
+
+        const { updatedElements, totalPlaced } = applyStayPutFillPageOnPage({
+          page: targetPage,
+          targetAssetIds,
+          targetRowIds: targetRowIds || [],
+          itemSize: { id: '', wMm: itemW, hMm: itemH },
+          pRect,
+          gapMm: job.settings.gapMm,
+        });
+
+        let updatedBlocks = [...(job.blocks || [])];
+        if (targetPage.blockId) {
+          updatedBlocks = updatedBlocks.map((b) => {
+            if (b.id !== targetPage.blockId) return b;
+            const nextRows = (b.rows || []).map((r) => {
+              const matches =
+                targetRowIds && targetRowIds.length > 0
+                  ? targetRowIds.includes(r.id || '')
+                  : targetAssetIds.includes(r.assetId);
+              return matches ? { ...r, fillPage: true, qty: totalPlaced } : r;
+            });
+            return { ...b, rows: nextRows };
+          });
+        }
+
+        set((s) => ({
+          jobs: s.jobs.map((j) =>
+            j.id === jobId
+              ? {
+                  ...j,
+                  blocks: updatedBlocks,
+                  pages: j.pages.map((p) =>
+                    p.id === targetPage.id
+                      ? { ...p, elements: updatedElements, stayPut: true }
+                      : p
+                  ),
+                }
+              : j
+          ),
+        }));
+      } else {
+        let updatedBlocks = [...(job.blocks || [])];
+        if (targetPage.blockId) {
+          updatedBlocks = updatedBlocks.map((b) => {
+            if (b.id !== targetPage.blockId) return b;
+            const nextRows = (b.rows || []).map((r) => {
+              const matches =
+                targetRowIds && targetRowIds.length > 0
+                  ? targetRowIds.includes(r.id || '')
+                  : targetAssetIds.includes(r.assetId);
+              return matches ? { ...r, fillPage: false } : r;
+            });
+            return { ...b, rows: nextRows };
+          });
+        }
+        set((s) => ({
+          jobs: s.jobs.map((j) => (j.id === jobId ? { ...j, blocks: updatedBlocks } : j)),
+        }));
+      }
+      return 'ok';
+    }
 
     const affectedBlocks = (job.blocks || []).filter(
-      (b) => b.kind === 'sheet' && b.rows?.some((r) => targetAssetIds.includes(r.assetId))
+      (b) =>
+        b.kind === 'sheet' &&
+        b.rows?.some((r) =>
+          targetRowIds && targetRowIds.length > 0
+            ? targetRowIds.includes(r.id || '')
+            : targetAssetIds.includes(r.assetId)
+        )
     );
     if (affectedBlocks.length === 0) return 'ok';
-
-    for (const b of affectedBlocks) {
-      const pages = job.pages.filter((p) => p.blockId === b.id);
-      if (blockSignature(pages) !== b.generatedSig && !opts?.force) {
-        return 'needs-confirm';
-      }
-    }
 
     state.commit(jobId);
 
@@ -2003,11 +2780,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     let currentPages = [...job.pages];
 
     for (const block of affectedBlocks) {
-      const nextRows = (block.rows || []).map((row) =>
-        targetAssetIds.includes(row.assetId)
-          ? { ...row, fillPage: value }
-          : row
-      );
+      const nextRows = (block.rows || []).map((row) => {
+        const matches =
+          targetRowIds && targetRowIds.length > 0
+            ? targetRowIds.includes(row.id || '')
+            : targetAssetIds.includes(row.assetId);
+        return matches ? { ...row, fillPage: value } : row;
+      });
       const updatedBlock: Block = {
         ...block,
         rows: nextRows,
@@ -2041,12 +2820,28 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       ),
     }));
 
+    if (targetRowIds && targetRowIds.length > 0) {
+      const matchingEls = currentPages.flatMap((p) => p.elements).filter((el) => targetRowIds.includes(el.rowId || ''));
+      if (matchingEls.length > 0) {
+        const firstEl = matchingEls[0];
+        const pageWithEl = currentPages.find((p) => p.elements.some((e) => e.id === firstEl.id));
+        if (pageWithEl) {
+          useUiStore.getState().setActivePage(pageWithEl.id);
+          if (matchingEls.length === 1) {
+            useUiStore.getState().select({ pageId: pageWithEl.id, elementId: firstEl.id });
+          } else {
+            useUiStore.getState().setSelection(pageWithEl.id, matchingEls.map((e) => e.id));
+          }
+        }
+      }
+    }
+
     return 'ok';
   },
 
   setPictureSizeAndQty: (
     jobId: string,
-    assetId: string | string[],
+    target: PictureTarget,
     size: { id: string; wMm: number; hMm: number },
     qty: number,
     opts?: { force?: boolean }
@@ -2055,30 +2850,32 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const job = state.jobs.find((j) => j.id === jobId);
     if (!job) return 'not-found';
 
-    const targetAssetIds = Array.isArray(assetId) ? assetId : [assetId];
-    if (targetAssetIds.length === 0) return 'ok';
-    const primaryAssetId = targetAssetIds[0];
+    const { assetIds: targetAssetIds, rowIds: targetRowIds } = parsePictureTarget(target);
+    if (targetAssetIds.length === 0 && (!targetRowIds || targetRowIds.length === 0)) return 'ok';
+    const primaryAssetId = targetAssetIds[0] || '';
 
-    const targetPage = job.pages.find((p) =>
-      p.elements.some((el) => targetAssetIds.includes(el.assetId || ''))
-    );
+    const targetPage =
+      job.pages.find((p) =>
+        p.elements.some((el) =>
+          (targetRowIds && targetRowIds.length > 0 && el.rowId && targetRowIds.includes(el.rowId)) ||
+          (el.assetId && targetAssetIds.includes(el.assetId))
+        )
+      ) ||
+      (useUiStore.getState().activePageId
+        ? job.pages.find((p) => p.id === useUiStore.getState().activePageId)
+        : undefined) ||
+      job.pages[0];
 
     const affectedBlockIds = new Set<string>();
     if (targetPage?.blockId) {
       affectedBlockIds.add(targetPage.blockId);
     }
     for (const b of job.blocks || []) {
-      if (b.assetIds.some((id) => targetAssetIds.includes(id))) {
+      if (
+        b.assetIds.some((id) => targetAssetIds.includes(id)) ||
+        (targetRowIds && targetRowIds.length > 0 && b.rows?.some((r) => r.id && targetRowIds.includes(r.id)))
+      ) {
         affectedBlockIds.add(b.id);
-      }
-    }
-
-    for (const bId of affectedBlockIds) {
-      const block = job.blocks.find((b) => b.id === bId);
-      if (!block) continue;
-      const bPages = job.pages.filter((p) => p.blockId === block.id);
-      if (blockSignature(bPages) !== block.generatedSig && !opts?.force) {
-        return 'needs-confirm';
       }
     }
 
@@ -2086,11 +2883,110 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const ctx = ctxForJob(job, state.assets);
     const clampedQty = Math.min(500, Math.max(1, Math.round(qty) || 1));
 
+    const isStayPut = targetPage && isPageStayPut(targetPage, job);
+    if (isStayPut && targetPage) {
+      const { wMm, hMm } = getPageDimensionsMm(targetPage);
+      const effectiveMargin = job.settings.borderless ? 0 : job.settings.marginMm;
+      const pRect = printableRect(wMm, hMm, effectiveMargin);
+
+      // 1. Resize variant
+      const { updatedElements: sizedElements, overflowElements: sizeOverflow } = applyStayPutVariantSizeOnPage({
+        page: targetPage,
+        targetAssetIds,
+        targetRowIds: targetRowIds || [],
+        newSize: size,
+        pRect,
+        gapMm: job.settings.gapMm,
+      });
+
+      // 2. Adjust quantity
+      const { updatedElements: qtyElements, overflowElements: qtyOverflow } = applyStayPutQuantityOnPage({
+        page: { ...targetPage, elements: sizedElements },
+        targetAssetIds,
+        targetRowIds: targetRowIds || [],
+        newQty: clampedQty,
+        itemSize: size,
+        pRect,
+        gapMm: job.settings.gapMm,
+      });
+
+      const allOverflow = [...sizeOverflow, ...qtyOverflow];
+      let updatedPages = job.pages.map((p) =>
+        p.id === targetPage.id
+          ? { ...p, elements: qtyElements, stayPut: true }
+          : p
+      );
+
+      if (allOverflow.length > 0) {
+        const startIdx = updatedPages.findIndex((p) => p.id === targetPage.id);
+        updatedPages = placeOverflowElements(
+          allOverflow,
+          updatedPages,
+          targetPage.paperId,
+          targetPage.orientation,
+          effectiveMargin,
+          job.settings.gapMm,
+          startIdx >= 0 ? startIdx : updatedPages.length - 1
+        );
+      }
+
+      let updatedBlocks = [...(job.blocks || [])];
+      if (targetPage.blockId) {
+        updatedBlocks = updatedBlocks.map((b) => {
+          if (b.id !== targetPage.blockId) return b;
+          const nextRows = (b.rows || []).map((r) => {
+            const matches =
+              targetRowIds && targetRowIds.length > 0
+                ? targetRowIds.includes(r.id || '')
+                : targetAssetIds.includes(r.assetId);
+            return matches ? { ...r, size, qty: clampedQty, fillPage: false } : r;
+          });
+          return { ...b, rows: nextRows };
+        });
+      }
+
+      set((s) => ({
+        jobs: s.jobs.map((j) =>
+          j.id === jobId
+            ? {
+                ...j,
+                blocks: updatedBlocks,
+                pages: updatedPages,
+              }
+            : j
+        ),
+      }));
+
+      const reselectedIds = qtyElements
+        .filter((el) =>
+          targetRowIds && targetRowIds.length > 0
+            ? targetRowIds.includes(el.rowId || '')
+            : el.assetId && targetAssetIds.includes(el.assetId)
+        )
+        .map((el) => el.id);
+
+      if (reselectedIds.length === 1) {
+        useUiStore.getState().setActivePage(targetPage.id);
+        useUiStore.getState().select({ pageId: targetPage.id, elementId: reselectedIds[0] });
+      } else if (reselectedIds.length > 1) {
+        useUiStore.getState().setActivePage(targetPage.id);
+        useUiStore.getState().setSelection(targetPage.id, reselectedIds);
+      }
+
+      return 'ok';
+    }
+
     const existingSheetBlock = targetPage?.blockId
       ? job.blocks.find((b) => b.id === targetPage.blockId && b.kind === 'sheet')
-      : (job.blocks || []).find((b) => b.kind === 'sheet' && b.assetIds.includes(primaryAssetId));
+      : (job.blocks || []).find((b) => b.kind === 'sheet');
 
-    const existingRows: SheetRow[] = existingSheetBlock?.rows ? [...existingSheetBlock.rows] : [];
+    if (existingSheetBlock?.id) {
+      affectedBlockIds.add(existingSheetBlock.id);
+    }
+
+    const existingRows: SheetRow[] = existingSheetBlock?.rows
+      ? existingSheetBlock.rows.map((r) => ({ ...r, id: r.id || nanoid() }))
+      : [];
 
     const pageElements = targetPage ? targetPage.elements : [];
     const pageAssetIds = Array.from(
@@ -2098,23 +2994,48 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     );
 
     const nextRows: SheetRow[] = [...existingRows];
-    for (const id of targetAssetIds) {
-      const rowIdx = nextRows.findIndex((r) => r.assetId === id);
-      if (rowIdx >= 0) {
-        nextRows[rowIdx] = {
-          ...nextRows[rowIdx],
-          size,
-          qty: clampedQty,
-          fillPage: false,
-        };
-      } else {
-        nextRows.push({
-          assetId: id,
-          size,
-          qty: clampedQty,
-          fillPage: false,
-          crop: false,
-        });
+    if (targetRowIds && targetRowIds.length > 0) {
+      for (const rId of targetRowIds) {
+        const rowIdx = nextRows.findIndex((r) => r.id === rId);
+        if (rowIdx >= 0) {
+          nextRows[rowIdx] = {
+            ...nextRows[rowIdx],
+            size,
+            qty: clampedQty,
+            fillPage: false,
+          };
+        }
+      }
+    } else {
+      for (const id of targetAssetIds) {
+        const matchingIndices: number[] = [];
+        for (let i = 0; i < nextRows.length; i++) {
+          if (nextRows[i].assetId === id) {
+            matchingIndices.push(i);
+          }
+        }
+        if (matchingIndices.length > 0) {
+          const firstIdx = matchingIndices[0];
+          const firstRow = nextRows[firstIdx];
+          for (let i = matchingIndices.length - 1; i > 0; i--) {
+            nextRows.splice(matchingIndices[i], 1);
+          }
+          nextRows[firstIdx] = {
+            ...firstRow,
+            size,
+            qty: clampedQty,
+            fillPage: false,
+          };
+        } else {
+          nextRows.push({
+            id: nanoid(),
+            assetId: id,
+            size,
+            qty: clampedQty,
+            fillPage: false,
+            crop: false,
+          });
+        }
       }
     }
 
@@ -2142,6 +3063,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           }
         }
         nextRows.push({
+          id: nanoid(),
           assetId: id,
           size: { id: `custom-${Math.round(wMm)}x${Math.round(hMm)}`, wMm, hMm },
           qty: 1,
@@ -2207,7 +3129,23 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       ),
     }));
 
-    checkAndClearSelection();
+    if (targetRowIds && targetRowIds.length > 0) {
+      const matchingEls = newSheetPages.flatMap((p) => p.elements).filter((el) => targetRowIds.includes(el.rowId || ''));
+      if (matchingEls.length > 0) {
+        const firstEl = matchingEls[0];
+        const pageWithEl = newSheetPages.find((p) => p.elements.some((e) => e.id === firstEl.id));
+        if (pageWithEl) {
+          useUiStore.getState().setActivePage(pageWithEl.id);
+          if (matchingEls.length === 1) {
+            useUiStore.getState().select({ pageId: pageWithEl.id, elementId: firstEl.id });
+          } else {
+            useUiStore.getState().setSelection(pageWithEl.id, matchingEls.map((e) => e.id));
+          }
+        }
+      }
+    } else {
+      checkAndClearSelection();
+    }
     return 'ok';
   },
 
@@ -2408,6 +3346,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           const target = updatedPages[placement.pageIndex];
           if (target) {
             target.elements = [...target.elements, placement.element];
+            target.stayPut = true;
           }
         }
 

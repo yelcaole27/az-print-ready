@@ -16,7 +16,7 @@ export interface BlockCtx {
   assetsById: Record<string, ImageAsset>;
 }
 
-export function generateBlockPages(block: Block, ctx: BlockCtx): Page[] {
+function generateBlockPagesInternal(block: Block, ctx: BlockCtx): Page[] {
   const createEmptyPage = (): Page => ({
     id: nanoid(),
     paperId: ctx.paperId,
@@ -129,17 +129,19 @@ export function generateBlockPages(block: Block, ctx: BlockCtx): Page[] {
       return pages;
     }
 
-    const orderedRows = [...rows].sort((a, b) => {
-      if (Boolean(a.fillPage) !== Boolean(b.fillPage)) {
-        return a.fillPage ? 1 : -1;
-      }
-      const areaA = a.size.wMm * a.size.hMm;
-      const areaB = b.size.wMm * b.size.hMm;
-      if (Math.abs(areaB - areaA) > 0.01) {
-        return areaB - areaA;
-      }
-      return 0;
-    });
+    const orderedRows = [...rows]
+      .map((r) => ({ ...r, id: r.id || nanoid() }))
+      .sort((a, b) => {
+        if (Boolean(a.fillPage) !== Boolean(b.fillPage)) {
+          return a.fillPage ? 1 : -1;
+        }
+        const areaA = a.size.wMm * a.size.hMm;
+        const areaB = b.size.wMm * b.size.hMm;
+        if (Math.abs(areaB - areaA) > 0.01) {
+          return areaB - areaA;
+        }
+        return 0;
+      });
 
     const settings: Settings = {
       unit: 'in',
@@ -193,7 +195,8 @@ export function generateBlockPages(block: Block, ctx: BlockCtx): Page[] {
         fillActiveOnly: false,
         settings,
         assetId: asset.id,
-        fit: row.crop ? 'cover' : 'contain',
+        rowId: row.id,
+        fit: 'cover',
       });
 
       if (packRes.placements.length > 0) {
@@ -257,7 +260,8 @@ export function generateBlockPages(block: Block, ctx: BlockCtx): Page[] {
               hMm: spot.h,
               rotation,
               assetId: asset.id,
-              fit: row.crop ? 'cover' : 'contain',
+              rowId: row.id,
+              fit: 'cover',
               cropGuides: false,
             };
             page.elements.push(element);
@@ -275,28 +279,40 @@ export function generateBlockPages(block: Block, ctx: BlockCtx): Page[] {
   return [createEmptyPage()];
 }
 
-export function blockSignature(pages: Page[]): string {
-  const parts: string[] = [`count:${pages.length}`];
-  for (const page of pages) {
-    parts.push('P');
-    for (const el of page.elements) {
-      const cropStr = el.crop
-        ? `${el.crop.x.toFixed(4)},${el.crop.y.toFixed(4)},${el.crop.w.toFixed(4)},${el.crop.h.toFixed(4)}`
-        : '';
-      parts.push(
-        [
-          el.type,
-          el.assetId || '',
-          el.xMm.toFixed(2),
-          el.yMm.toFixed(2),
-          el.wMm.toFixed(2),
-          el.hMm.toFixed(2),
-          el.rotation || 0,
-          el.fit || '',
-          cropStr,
-        ].join(':')
-      );
-    }
+export function pageSignature(page: Page): string {
+  const parts: string[] = ['P'];
+  for (const el of page.elements) {
+    const cropStr = el.crop
+      ? `${el.crop.x.toFixed(4)},${el.crop.y.toFixed(4)},${el.crop.w.toFixed(4)},${el.crop.h.toFixed(4)}`
+      : '';
+    parts.push(
+      [
+        el.type,
+        el.assetId || '',
+        el.rowId || '',
+        el.xMm.toFixed(2),
+        el.yMm.toFixed(2),
+        el.wMm.toFixed(2),
+        el.hMm.toFixed(2),
+        el.rotation || 0,
+        el.fit || '',
+        cropStr,
+      ].join(':')
+    );
   }
   return parts.join('|');
 }
+
+export function blockSignature(pages: Page[]): string {
+  return [`count:${pages.length}`, ...pages.map(pageSignature)].join('|');
+}
+
+export function generateBlockPages(block: Block, ctx: BlockCtx): Page[] {
+  const pages = generateBlockPagesInternal(block, ctx);
+  for (const page of pages) {
+    page.generatedSig = pageSignature(page);
+    page.stayPut = false;
+  }
+  return pages;
+}
+

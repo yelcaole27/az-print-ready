@@ -191,7 +191,6 @@ export function Sidebar() {
     setPictureSizeAndQty,
     addBlocks,
     updateSettings,
-    hasManualEdits,
     alignElements,
   } = useSessionStore();
 
@@ -283,39 +282,12 @@ export function Sidebar() {
 
   const handlePaperChange = (newPaperId: string) => {
     if (!activeJob || !firstPage || newPaperId === firstPage.paperId) return;
-    if (hasManualEdits(activeJob.id)) {
-      openConfirmModal({
-        title: 'Reset manual',
-        accentWord: 'changes?',
-        message: 'Changing paper size will rearrange pictures on the page.',
-        confirmLabel: 'Reset and change',
-        destructive: true,
-        onConfirm: () => {
-          setJobPaper(activeJob.id, newPaperId);
-          setPaperMoreOpen(false);
-        },
-      });
-      return;
-    }
     setJobPaper(activeJob.id, newPaperId);
     setPaperMoreOpen(false);
   };
 
   const handleOrientationChange = (newOrientation: 'portrait' | 'landscape') => {
     if (!activeJob || !firstPage || newOrientation === firstPage.orientation) return;
-    if (hasManualEdits(activeJob.id)) {
-      openConfirmModal({
-        title: 'Reset manual',
-        accentWord: 'changes?',
-        message: 'Changing orientation will rearrange pictures on the page.',
-        confirmLabel: 'Reset and turn',
-        destructive: true,
-        onConfirm: () => {
-          setJobOrientation(activeJob.id, newOrientation);
-        },
-      });
-      return;
-    }
     setJobOrientation(activeJob.id, newOrientation);
   };
 
@@ -436,54 +408,87 @@ export function Sidebar() {
     });
   };
 
+  const selectedElements = React.useMemo(() => {
+    if (!activeJob) return [];
+    if (selectedIds.length > 0 && selectedPageId) {
+      const page = activeJob.pages.find((p) => p.id === selectedPageId);
+      return page ? page.elements.filter((el) => selectedIds.includes(el.id)) : [];
+    }
+    if (selected) {
+      const page = activeJob.pages.find((p) => p.id === selected.pageId);
+      const el = page?.elements.find((e) => e.id === selected.elementId);
+      return el ? [el] : [];
+    }
+    return [];
+  }, [activeJob, selectedIds, selectedPageId, selected]);
+
+  const targetRowIds: string[] = React.useMemo(() => {
+    if (selectedElements.length > 0) {
+      return Array.from(
+        new Set(selectedElements.map((el) => el.rowId).filter((id): id is string => Boolean(id)))
+      );
+    }
+    return [];
+  }, [selectedElements]);
+
   const targetAssetIds: string[] = React.useMemo(() => {
     if (isAllSelected) {
       return jobPictureAssetIds;
     }
-    if (selectedIds.length >= 2 && selectedPageId && activeJob) {
-      const page = activeJob.pages.find((p) => p.id === selectedPageId);
-      if (page) {
-        return Array.from(
-          new Set(
-            page.elements
-              .filter((el) => selectedIds.includes(el.id))
-              .map((el) => el.assetId)
-              .filter((id): id is string => Boolean(id))
-          )
-        );
-      }
+    if (selectedElements.length > 0) {
+      return Array.from(
+        new Set(selectedElements.map((el) => el.assetId).filter((id): id is string => Boolean(id)))
+      );
     }
     if (activeAssetId) {
       return [activeAssetId];
     }
     return [];
-  }, [isAllSelected, jobPictureAssetIds, selectedIds, selectedPageId, activeJob, activeAssetId]);
+  }, [isAllSelected, jobPictureAssetIds, selectedElements, activeAssetId]);
 
   const placedElements = React.useMemo(() => {
-    if (!activeJob || targetAssetIds.length === 0) return [];
-    return activeJob.pages
-      .flatMap((p) => p.elements)
-      .filter((el) => el.assetId && targetAssetIds.includes(el.assetId));
-  }, [activeJob, targetAssetIds]);
+    if (!activeJob) return [];
+    if (targetRowIds.length > 0) {
+      return activeJob.pages
+        .flatMap((p) => p.elements)
+        .filter((el) => el.rowId && targetRowIds.includes(el.rowId));
+    }
+    if (targetAssetIds.length > 0) {
+      return activeJob.pages
+        .flatMap((p) => p.elements)
+        .filter((el) => el.assetId && targetAssetIds.includes(el.assetId));
+    }
+    return [];
+  }, [activeJob, targetRowIds, targetAssetIds]);
 
   const isPlaced = placedElements.length > 0;
 
   // Active asset, block, and sheet row lookup
-  const activeAsset = assets.find((a) => a.id === activeAssetId);
+  const activeAsset = assets.find((a) =>
+    targetAssetIds.length > 0 ? targetAssetIds[0] === a.id : a.id === activeAssetId
+  );
   const activeBlock = isPlaced && activeAsset
     ? activeJob?.blocks.find((b) => b.assetIds.includes(activeAsset.id))
     : (isPlaced && targetAssetIds.length > 0
         ? activeJob?.blocks.find((b) => b.assetIds.some((id) => targetAssetIds.includes(id)))
         : null);
 
-  const activeRow = isPlaced
-    ? ((activeAsset && activeBlock?.kind === 'sheet'
-        ? activeBlock.rows?.find((r) => r.assetId === activeAsset.id)
-        : undefined) ||
-      (targetAssetIds.length > 0
-        ? activeJob?.blocks.find((b) => b.kind === 'sheet')?.rows?.find((r) => targetAssetIds.includes(r.assetId))
-        : undefined))
-    : undefined;
+  const activeRows = React.useMemo(() => {
+    if (!activeJob) return [];
+    if (targetRowIds.length > 0) {
+      return activeJob.blocks
+        .flatMap((b) => b.rows || [])
+        .filter((r) => r.id && targetRowIds.includes(r.id));
+    }
+    if (targetAssetIds.length > 0) {
+      return activeJob.blocks
+        .flatMap((b) => b.rows || [])
+        .filter((r) => targetAssetIds.includes(r.assetId));
+    }
+    return [];
+  }, [activeJob, targetRowIds, targetAssetIds]);
+
+  const activeRow = activeRows[0];
 
   const isCollageBlock = Boolean(
     activeBlock && activeBlock.kind === 'collage'
@@ -497,6 +502,12 @@ export function Sidebar() {
       )
   );
 
+  const targetPayload = React.useMemo(() => {
+    return targetRowIds.length > 0
+      ? { rowIds: targetRowIds, assetIds: targetAssetIds }
+      : { assetIds: targetAssetIds };
+  }, [targetRowIds, targetAssetIds]);
+
   const applySize = (
     spec:
       | { mode: 'default' }
@@ -504,20 +515,8 @@ export function Sidebar() {
       | { mode: 'fill' }
       | { mode: 'width' }
   ) => {
-    if (!activeJob || targetAssetIds.length === 0) return;
-    const res = setPictureSize(activeJob.id, targetAssetIds, spec);
-    if (res === 'needs-confirm') {
-      openConfirmModal({
-        title: 'Reset manual',
-        accentWord: 'changes?',
-        message: 'Applying this size will rearrange pictures on the page.',
-        confirmLabel: 'Reset and apply',
-        destructive: true,
-        onConfirm: () => {
-          setPictureSize(activeJob.id, targetAssetIds, spec, { force: true });
-        },
-      });
-    }
+    if (!activeJob || (targetAssetIds.length === 0 && targetRowIds.length === 0)) return;
+    setPictureSize(activeJob.id, targetPayload, spec);
     setSizeMoreOpen(false);
   };
 
@@ -539,59 +538,23 @@ export function Sidebar() {
   };
 
   const handleQtyInput = (val: string) => {
-    if (!activeJob || targetAssetIds.length === 0) return;
+    if (!activeJob || (targetAssetIds.length === 0 && targetRowIds.length === 0)) return;
     const parsed = parseInt(val, 10);
     const clamped = Math.min(500, Math.max(1, isNaN(parsed) ? (activeRow?.qty ?? 1) : parsed));
-    const res = setPictureQty(activeJob.id, targetAssetIds, clamped);
-    if (res === 'needs-confirm') {
-      openConfirmModal({
-        title: 'Reset manual',
-        accentWord: 'changes?',
-        message: 'Changing quantity will rearrange pictures on the page.',
-        confirmLabel: 'Reset and apply',
-        destructive: true,
-        onConfirm: () => {
-          setPictureQty(activeJob.id, targetAssetIds, clamped, { force: true });
-        },
-      });
-    }
+    setPictureQty(activeJob.id, targetPayload, clamped);
   };
 
   const handleQtyStep = (delta: number) => {
-    if (!activeJob || targetAssetIds.length === 0) return;
+    if (!activeJob || (targetAssetIds.length === 0 && targetRowIds.length === 0)) return;
     const currentQty = activeRow?.qty ?? 1;
     const nextQty = Math.min(500, Math.max(1, currentQty + delta));
-    const res = setPictureQty(activeJob.id, targetAssetIds, nextQty);
-    if (res === 'needs-confirm') {
-      openConfirmModal({
-        title: 'Reset manual',
-        accentWord: 'changes?',
-        message: 'Changing quantity will rearrange pictures on the page.',
-        confirmLabel: 'Reset and apply',
-        destructive: true,
-        onConfirm: () => {
-          setPictureQty(activeJob.id, targetAssetIds, nextQty, { force: true });
-        },
-      });
-    }
+    setPictureQty(activeJob.id, targetPayload, nextQty);
   };
 
   const handleToggleFillPage = () => {
-    if (!activeJob || targetAssetIds.length === 0) return;
+    if (!activeJob || (targetAssetIds.length === 0 && targetRowIds.length === 0)) return;
     const nextFill = !(activeRow?.fillPage ?? false);
-    const res = setPictureFillPage(activeJob.id, targetAssetIds, nextFill);
-    if (res === 'needs-confirm') {
-      openConfirmModal({
-        title: 'Reset manual',
-        accentWord: 'changes?',
-        message: 'Filling the page will rearrange pictures on the page.',
-        confirmLabel: 'Reset and fill',
-        destructive: true,
-        onConfirm: () => {
-          setPictureFillPage(activeJob.id, targetAssetIds, nextFill, { force: true });
-        },
-      });
-    }
+    setPictureFillPage(activeJob.id, targetPayload, nextFill);
   };
 
   const isStartState = !activeJob?.pages.some((p) => p.elements.length > 0);
@@ -631,7 +594,9 @@ export function Sidebar() {
         if (block.kind === 'fill') return 'fill';
         if (block.kind === 'width') return 'width';
         if (block.kind === 'sheet') {
-          const row = block.rows?.find((r) => r.assetId === el.assetId);
+          const row = el.rowId
+            ? block.rows?.find((r) => r.id === el.rowId)
+            : block.rows?.find((r) => r.assetId === el.assetId);
           if (row?.size?.id) return row.size.id;
         }
       }
@@ -669,20 +634,8 @@ export function Sidebar() {
   }, [customQuickSets]);
 
   const applyQuickSet = (chip: QuickSet) => {
-    if (!activeJob || targetAssetIds.length === 0) return;
-    const res = setPictureSizeAndQty(activeJob.id, targetAssetIds, chip.size, chip.qty);
-    if (res === 'needs-confirm') {
-      openConfirmModal({
-        title: 'Reset manual',
-        accentWord: 'changes?',
-        message: 'Applying this quick set will rearrange pictures on the page.',
-        confirmLabel: 'Reset and apply',
-        destructive: true,
-        onConfirm: () => {
-          setPictureSizeAndQty(activeJob.id, targetAssetIds, chip.size, chip.qty, { force: true });
-        },
-      });
-    }
+    if (!activeJob || (targetAssetIds.length === 0 && targetRowIds.length === 0)) return;
+    setPictureSizeAndQty(activeJob.id, targetPayload, chip.size, chip.qty);
   };
 
   const isSaveFull = customQuickSets.length >= 8;
@@ -1420,7 +1373,7 @@ export function Sidebar() {
                     -
                   </button>
                   <input
-                    key={`${targetAssetIds.join('-')}-${isPlaced ? (activeRow?.qty ?? placedElements.length) : 'unplaced'}-${isPlaced && activeRow?.fillPage ? 'fill' : 'normal'}`}
+                    key={`${targetRowIds.join('-') || targetAssetIds.join('-')}-${isPlaced ? (activeRow?.qty ?? placedElements.length) : 'unplaced'}-${isPlaced && activeRow?.fillPage ? 'fill' : 'normal'}`}
                     type="number"
                     min={1}
                     max={500}

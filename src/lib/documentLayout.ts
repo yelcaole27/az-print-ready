@@ -75,7 +75,7 @@ export function layoutDocumentImage({
       wMm,
       hMm,
       rotation: chosen.rot,
-      fit: 'contain',
+      fit: 'cover',
       cropGuides: false,
     };
 
@@ -125,7 +125,7 @@ export function layoutDocumentImage({
       wMm: P.w,
       hMm: totalH,
       rotation: 0,
-      fit: 'contain',
+      fit: 'cover',
       cropGuides: false,
     };
 
