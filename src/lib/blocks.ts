@@ -39,14 +39,16 @@ function generateBlockPagesInternal(block: Block, ctx: BlockCtx): Page[] {
         ? 'fill-page'
         : 'fill-width';
 
+    const rowCropRect = block.rows?.[0]?.cropRect;
     const pagesElements = layoutDocumentImage({
       asset,
       pageWMm: ctx.pageWMm,
       pageHMm: ctx.pageHMm,
       marginMm: ctx.marginMm,
       fit: fitMode,
-      autoRotate: true,
+      autoRotate: false,
       align: 'center',
+      cropRect: rowCropRect,
     });
 
     if (pagesElements.length === 0) {
@@ -83,7 +85,7 @@ function generateBlockPagesInternal(block: Block, ctx: BlockCtx): Page[] {
         pageHMm: ctx.pageHMm,
         marginMm: ctx.marginMm,
         fit: 'fit-page',
-        autoRotate: true,
+        autoRotate: false,
         align: 'center',
       });
       return [
@@ -164,16 +166,27 @@ function generateBlockPagesInternal(block: Block, ctx: BlockCtx): Page[] {
       let itemWMm = row.size.wMm;
       let itemHMm = row.size.hMm;
 
-      const isAssetLandscape = asset.pxW > asset.pxH;
-      const isSizeLandscape = itemWMm > itemHMm;
-      if ((isAssetLandscape && !isSizeLandscape) || (!isAssetLandscape && isSizeLandscape)) {
-        const temp = itemWMm;
-        itemWMm = itemHMm;
-        itemHMm = temp;
+      if (row.size.id === 'default' || itemWMm <= 0 || itemHMm <= 0) {
+        const ar = (asset.pxW || 1) / (asset.pxH || 1);
+        if (ar >= printableW / printableH) {
+          itemWMm = printableW;
+          itemHMm = printableW / ar;
+        } else {
+          itemHMm = printableH;
+          itemWMm = printableH * ar;
+        }
+      } else {
+        const isAssetLandscape = asset.pxW > asset.pxH;
+        const isSizeLandscape = itemWMm > itemHMm;
+        if ((isAssetLandscape && !isSizeLandscape) || (!isAssetLandscape && isSizeLandscape)) {
+          const temp = itemWMm;
+          itemWMm = itemHMm;
+          itemHMm = temp;
+        }
       }
 
       const fitsNormal = itemWMm <= printableW && itemHMm <= printableH;
-      const fitsRotated = itemHMm <= printableW && itemWMm <= printableH;
+      const fitsRotated = itemHMm <= printableW && itemHMm <= printableH;
 
       if (!fitsNormal && !fitsRotated) {
         useUiStore.getState().setMessage({
@@ -191,12 +204,13 @@ function generateBlockPagesInternal(block: Block, ctx: BlockCtx): Page[] {
         itemWMm,
         itemHMm,
         qty: targetQty,
-        allowRotate: true,
+        allowRotate: row.size.id === 'default' ? false : true,
         fillActiveOnly: false,
         settings,
         assetId: asset.id,
         rowId: row.id,
         fit: 'cover',
+        cropRect: row.cropRect,
       });
 
       if (packRes.placements.length > 0) {
@@ -263,6 +277,7 @@ function generateBlockPagesInternal(block: Block, ctx: BlockCtx): Page[] {
               rowId: row.id,
               fit: 'cover',
               cropGuides: false,
+              cropRect: row.cropRect,
             };
             page.elements.push(element);
             occupied.push(spot);

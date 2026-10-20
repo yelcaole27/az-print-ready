@@ -9,8 +9,10 @@ import { BlockCtx, generateBlockPages, blockSignature } from '@/lib/blocks';
 import { useUiStore } from '@/store/useUiStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import { nanoid } from 'nanoid';
+import { Link2 } from 'lucide-react';
 import { ElementBox } from './ElementBox';
 import { CutGuides } from './CutGuides';
+import { refitCropRectToRatio, getDefaultCropRect } from '@/lib/cropUtils';
 
 export interface PageViewProps {
   page: Page;
@@ -64,6 +66,64 @@ export function PageView({
 
   const isDropTarget = Boolean(dropTargetPageId && dropTargetPageId === page.id);
   const showGuidesHere = (isActive && !dropTargetPageId) || isDropTarget;
+
+  const activeAssetId = useUiStore((s) => s.activeAssetId);
+  const setActiveAssetId = useUiStore((s) => s.setActiveAssetId);
+  const assets = useSessionStore((s) => s.assets);
+  const jobs = useSessionStore((s) => s.jobs);
+  const setPageSeeFront = useSessionStore((s) => s.setPageSeeFront);
+  const fillAllSlots = useSessionStore((s) => s.fillAllSlots);
+  const matchFrontSlots = useSessionStore((s) => s.matchFrontSlots);
+  const addElement = useSessionStore((s) => s.addElement);
+  const commit = useSessionStore((s) => s.commit);
+
+  const activeJob = jobs.find((j) => j.id === jobId);
+  const frontPage = page.isBack
+    ? activeJob?.pages.find((p) => p.id === page.frontPageId)
+    : null;
+  const frontPageIndex = frontPage
+    ? activeJob?.pages.findIndex((p) => p.id === frontPage.id) ?? -1
+    : -1;
+  const frontPageNum = frontPageIndex !== -1 ? frontPageIndex + 1 : pageIndex;
+
+  const occupiedSlotIds = new Set(
+    page.elements.map((el) => el.frontElementId).filter(Boolean) as string[]
+  );
+  const emptySlots = (frontPage?.elements || []).filter(
+    (el) => !occupiedSlotIds.has(el.id)
+  );
+  const hasEmptySlots = emptySlots.length > 0;
+  const hasSlottedElements = page.elements.some((el) => Boolean(el.frontElementId));
+
+  const dropIntoSlot = (slot: PageElement, assetIdToUse: string) => {
+    commit(jobId);
+    const assetObj = assets.find((a) => a.id === assetIdToUse);
+    const existingEl = activeJob?.pages.flatMap((p) => p.elements).find((el) => el.assetId === assetIdToUse && el.cropRect);
+    const existingRow = activeJob?.blocks?.flatMap((b) => b.rows || []).find((r) => r.assetId === assetIdToUse && r.cropRect);
+    const baseCrop = existingEl?.cropRect || existingRow?.cropRect;
+
+    const slotRatio = slot.wMm / (slot.hMm || 1);
+    const newCrop = baseCrop && assetObj
+      ? refitCropRectToRatio(baseCrop, assetObj.pxW || 1, assetObj.pxH || 1, slotRatio)
+      : (assetObj ? getDefaultCropRect(assetObj.pxW || 1, assetObj.pxH || 1, slotRatio) : undefined);
+
+    const newElement: PageElement = {
+      id: nanoid(),
+      type: 'image',
+      assetId: assetIdToUse,
+      xMm: slot.xMm,
+      yMm: slot.yMm,
+      wMm: slot.wMm,
+      hMm: slot.hMm,
+      rotation: slot.rotation,
+      cropRect: newCrop,
+      fit: 'cover',
+      frontElementId: slot.id,
+    };
+    addElement(jobId, page.id, newElement);
+    select({ pageId: page.id, elementId: newElement.id });
+    setActiveAssetId(assetIdToUse);
+  };
 
   // Marquee selection box state
   const [marqueeBox, setMarqueeBox] = useState<{
@@ -295,18 +355,16 @@ export function PageView({
         } else {
           const asset = sessionStore.assets.find((a) => a.id === assetId);
           const ar = asset && asset.pxW && asset.pxH ? asset.pxW / asset.pxH : 1;
-          const maxW = printableW * 0.5;
-          const maxH = printableH * 0.5;
           let sW: number;
           let sH: number;
-          if (ar >= maxW / maxH) {
-            sW = maxW;
-            sH = maxW / ar;
+          if (ar >= printableW / printableH) {
+            sW = printableW;
+            sH = printableW / ar;
           } else {
-            sH = maxH;
-            sW = maxH * ar;
+            sH = printableH;
+            sW = printableH * ar;
           }
-          targetSize = { id: `custom-${Math.round(sW)}x${Math.round(sH)}`, wMm: sW, hMm: sH };
+          targetSize = { id: 'default', wMm: sW, hMm: sH };
         }
       }
 
@@ -377,31 +435,20 @@ export function PageView({
     }
 
     // 1. Determine size for free page
+    const asset = sessionStore.assets.find((a) => a.id === assetId);
+    const ar =
+      asset && asset.pxW && asset.pxH
+        ? asset.pxW / asset.pxH
+        : 1;
+
     let wMm: number;
     let hMm: number;
-
-    const existingElement = job.pages
-      .flatMap((p) => p.elements)
-      .find((el) => el.assetId === assetId);
-
-    if (existingElement) {
-      wMm = existingElement.wMm;
-      hMm = existingElement.hMm;
+    if (ar >= printableW / printableH) {
+      wMm = printableW;
+      hMm = printableW / ar;
     } else {
-      const asset = sessionStore.assets.find((a) => a.id === assetId);
-      const ar =
-        asset && asset.pxW && asset.pxH
-          ? asset.pxW / asset.pxH
-          : 1;
-      const maxW = printableW * 0.5;
-      const maxH = printableH * 0.5;
-      if (ar >= maxW / maxH) {
-        wMm = maxW;
-        hMm = maxW / ar;
-      } else {
-        hMm = maxH;
-        wMm = maxH * ar;
-      }
+      hMm = printableH;
+      wMm = printableH * ar;
     }
 
     wMm = Math.min(wMm, printableW);
@@ -425,16 +472,38 @@ export function PageView({
     const clampedX = maxX >= minX ? Math.max(minX, Math.min(maxX, leftMm)) : minX;
     const clampedY = maxY >= minY ? Math.max(minY, Math.min(maxY, topMm)) : minY;
 
+    let finalX = clampedX;
+    let finalY = clampedY;
+    let finalW = wMm;
+    let finalH = hMm;
+    let slotIdToSnap: string | undefined;
+
+    if (page.isBack && frontPage) {
+      const snapSlot = frontPage.elements.find((s) => {
+        const dx = Math.abs(s.xMm - clampedX);
+        const dy = Math.abs(s.yMm - clampedY);
+        return dx <= 3 && dy <= 3;
+      });
+      if (snapSlot) {
+        finalX = snapSlot.xMm;
+        finalY = snapSlot.yMm;
+        finalW = snapSlot.wMm;
+        finalH = snapSlot.hMm;
+        slotIdToSnap = snapSlot.id;
+      }
+    }
+
     const newElement: PageElement = {
       id: nanoid(),
       type: 'image',
       assetId,
-      xMm: Math.round(clampedX * 100) / 100,
-      yMm: Math.round(clampedY * 100) / 100,
-      wMm: Math.round(wMm * 100) / 100,
-      hMm: Math.round(hMm * 100) / 100,
+      xMm: Math.round(finalX * 100) / 100,
+      yMm: Math.round(finalY * 100) / 100,
+      wMm: Math.round(finalW * 100) / 100,
+      hMm: Math.round(finalH * 100) / 100,
       rotation: 0,
       fit: 'cover',
+      frontElementId: slotIdToSnap,
     };
 
     sessionStore.addElement(jobId, page.id, newElement);
@@ -445,6 +514,52 @@ export function PageView({
 
   return (
     <div className="relative flex flex-col items-center" data-page-id={page.id}>
+      {/* Top back-page bar with See front toggle and actions */}
+      {page.isBack && (
+        <div
+          style={{ width: `${pageWidthPx}px` }}
+          className="mb-2 px-1 flex items-center justify-between text-xs select-none"
+        >
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-muted flex items-center gap-1.5 text-[12px]">
+              <Link2 className="w-3.5 h-3.5 text-blue" />
+              Back of {frontPageNum}
+            </span>
+            <label className="flex items-center gap-1.5 text-xs text-ink cursor-pointer ml-3 font-medium">
+              <input
+                type="checkbox"
+                checked={page.seeFront !== false}
+                onChange={(e) => setPageSeeFront(jobId, page.id, e.target.checked)}
+                className="w-3.5 h-3.5 rounded border-line text-blue focus:ring-blue"
+              />
+              <span>See front</span>
+            </label>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {hasSlottedElements && (
+              <button
+                type="button"
+                onClick={() => matchFrontSlots(jobId, page.id)}
+                className="px-2.5 py-1 rounded-[8px] bg-surface2 hover:bg-surface border border-line text-xs font-semibold text-ink cursor-pointer transition-colors"
+                title="Re-snap back pictures to front slots"
+              >
+                Match front
+              </button>
+            )}
+            {activeAssetId && hasEmptySlots && (
+              <button
+                type="button"
+                onClick={() => fillAllSlots(jobId, page.id, activeAssetId)}
+                className="px-2.5 py-1 rounded-[8px] bg-blue text-white hover:bg-blue/90 text-xs font-semibold cursor-pointer transition-colors"
+                title="Fill all empty slots with selected picture"
+              >
+                Fill all slots
+              </button>
+            )}
+          </div>
+        </div>
+      )}
       {/* 4 corner crop marks 4px outside the page */}
       <div
         className="absolute pointer-events-none z-10"
@@ -604,6 +719,74 @@ export function PageView({
             }}
             className="absolute border border-sheet-blue pointer-events-none z-30"
           />
+        )}
+
+        {/* See-through front guide on back page */}
+        {page.isBack && page.seeFront !== false && frontPage && (
+          <div className="absolute inset-0 pointer-events-none z-10" aria-hidden="true">
+            {frontPage.elements.map((frontEl) => {
+              const elLeftPx = mmToScreenPx(frontEl.xMm, zoom);
+              const elTopPx = mmToScreenPx(frontEl.yMm, zoom);
+              const elWPx = mmToScreenPx(frontEl.wMm, zoom);
+              const elHPx = mmToScreenPx(frontEl.hMm, zoom);
+              const isOccupied = occupiedSlotIds.has(frontEl.id);
+              const frontAsset = frontEl.assetId
+                ? assets.find((a) => a.id === frontEl.assetId)
+                : null;
+
+              return (
+                <div
+                  key={`guide-${frontEl.id}`}
+                  style={{
+                    position: 'absolute',
+                    left: `${elLeftPx}px`,
+                    top: `${elTopPx}px`,
+                    width: `${elWPx}px`,
+                    height: `${elHPx}px`,
+                    border: '1.5px dashed rgba(27, 155, 240, 0.45)',
+                    backgroundColor: isOccupied ? 'transparent' : 'rgba(27, 155, 240, 0.04)',
+                    boxSizing: 'border-box',
+                    overflow: 'hidden',
+                    pointerEvents: !isOccupied ? 'auto' : 'none',
+                    cursor: !isOccupied && activeAssetId ? 'pointer' : 'default',
+                  }}
+                  title={!isOccupied && activeAssetId ? 'Click to drop selected picture' : undefined}
+                  onClick={(e) => {
+                    if (!isOccupied && activeAssetId) {
+                      e.stopPropagation();
+                      dropIntoSlot(frontEl, activeAssetId);
+                    }
+                  }}
+                  onDragOver={(e) => {
+                    if (!isOccupied && e.dataTransfer.types.includes('application/x-azpr-asset')) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      e.dataTransfer.dropEffect = 'copy';
+                    }
+                  }}
+                  onDrop={(e) => {
+                    if (!isOccupied && e.dataTransfer.types.includes('application/x-azpr-asset')) {
+                      const droppedAssetId = e.dataTransfer.getData('application/x-azpr-asset');
+                      if (droppedAssetId) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        dropIntoSlot(frontEl, droppedAssetId);
+                      }
+                    }
+                  }}
+                >
+                  {frontAsset && (
+                    <img
+                      src={frontAsset.previewUrl || frontAsset.thumbUrl || frontAsset.objectUrl}
+                      alt=""
+                      className="w-full h-full object-cover pointer-events-none select-none"
+                      style={{ opacity: 0.25 }}
+                    />
+                  )}
+                </div>
+              );
+            })}
+          </div>
         )}
 
         {/* Page Elements */}

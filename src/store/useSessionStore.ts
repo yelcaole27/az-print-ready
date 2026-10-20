@@ -5,6 +5,7 @@ import { getPageDimensionsMm, clampToPage } from '@/lib/pageGeometry';
 import { useUiStore } from '@/store/useUiStore';
 import { BlockCtx, generateBlockPages, blockSignature } from '@/lib/blocks';
 import { printableRect, findSpot, Rect } from '@/lib/packing';
+import { refitCropRectToRatio } from '@/lib/cropUtils';
 import {
   isPageStayPut,
   applyStayPutVariantSizeOnPage,
@@ -32,6 +33,12 @@ interface SessionState extends Session {
   setUnit: (unit: Unit) => void;
 
   addPage: (jobId: string) => void;
+  addBackPage: (jobId: string, frontPageId: string) => string | null;
+  removeBackPage: (jobId: string, backPageId: string) => void;
+  setPageFlipMode: (jobId: string, pageId: string, flipMode: 'sideways' | 'upward') => void;
+  setPageSeeFront: (jobId: string, pageId: string, seeFront: boolean) => void;
+  fillAllSlots: (jobId: string, backPageId: string, assetId: string) => void;
+  matchFrontSlots: (jobId: string, backPageId: string) => void;
   removePage: (jobId: string, pageId: string) => void;
   setJobPaper: (jobId: string, paperId: string) => void;
   setJobOrientation: (jobId: string, orientation: 'portrait' | 'landscape') => void;
@@ -73,7 +80,7 @@ interface SessionState extends Session {
     fromPageId: string,
     toPageId: string,
     elementId: string,
-    pos?: { xMm: number; yMm: number }
+    pos?: { xMm: number; yMm: number; wMm?: number; hMm?: number; frontElementId?: string | null }
   ) => void;
   addPageAndMove: (
     jobId: string,
@@ -143,6 +150,12 @@ interface SessionState extends Session {
     qty: number,
     opts?: { force?: boolean }
   ) => 'ok' | 'not-found';
+  applyVariantCrop: (
+    jobId: string,
+    target: PictureTarget,
+    cropRect: { x: number; y: number; w: number; h: number } | null
+  ) => void;
+  refitDefaultElements: () => void;
 
   addAssets: (newAssets: ImageAsset[], jobId?: string) => void;
   discardAssets: (ids: string[]) => void;
@@ -495,10 +508,38 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const { selected, selectedIds, selectedPageId, activePageId, clearSelection, setSelection, setActivePage } =
       useUiStore.getState();
     if (selected) {
-      const page = previousJob.pages.find((p) => p.id === selected.pageId);
-      const element = page?.elements.find((el) => el.id === selected.elementId);
+      let page = previousJob.pages.find((p) => p.id === selected.pageId);
+      let element = page?.elements.find((el) => el.id === selected.elementId);
       if (!element) {
-        clearSelection();
+        const currentJobPageIndex = currentJob.pages.findIndex((p) => p.id === selected.pageId);
+        const currentJobPage = currentJobPageIndex !== -1 ? currentJob.pages[currentJobPageIndex] : currentJob.pages[0];
+        const currentEl = currentJobPage?.elements.find((el) => el.id === selected.elementId);
+
+        let matchedPage = currentJobPageIndex !== -1 && previousJob.pages[currentJobPageIndex]
+          ? previousJob.pages[currentJobPageIndex]
+          : previousJob.pages[0];
+        let matchingEl = matchedPage?.elements.find((el) =>
+          (currentEl?.rowId && el.rowId === currentEl.rowId) ||
+          (currentEl?.assetId && el.assetId === currentEl.assetId)
+        );
+        if (!matchingEl) {
+          for (const p of previousJob.pages) {
+            matchingEl = p.elements.find((el) =>
+              (currentEl?.rowId && el.rowId === currentEl.rowId) ||
+              (currentEl?.assetId && el.assetId === currentEl.assetId)
+            );
+            if (matchingEl) {
+              matchedPage = p;
+              break;
+            }
+          }
+        }
+
+        if (matchingEl && matchedPage) {
+          useUiStore.getState().select({ pageId: matchedPage.id, elementId: matchingEl.id });
+        } else {
+          clearSelection();
+        }
       }
     } else if (selectedPageId && selectedIds.length > 0) {
       const page = previousJob.pages.find((p) => p.id === selectedPageId);
@@ -511,7 +552,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
 
     if (activePageId && !previousJob.pages.some((p) => p.id === activePageId)) {
-      setActivePage(previousJob.pages[0]?.id || null);
+      const activeIdx = currentJob.pages.findIndex((p) => p.id === activePageId);
+      const targetPage = activeIdx !== -1 && previousJob.pages[activeIdx]
+        ? previousJob.pages[activeIdx]
+        : previousJob.pages[0];
+      setActivePage(targetPage?.id || null);
     }
   },
 
@@ -538,10 +583,38 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const { selected, selectedIds, selectedPageId, activePageId, clearSelection, setSelection, setActivePage } =
       useUiStore.getState();
     if (selected) {
-      const page = nextJob.pages.find((p) => p.id === selected.pageId);
-      const element = page?.elements.find((el) => el.id === selected.elementId);
+      let page = nextJob.pages.find((p) => p.id === selected.pageId);
+      let element = page?.elements.find((el) => el.id === selected.elementId);
       if (!element) {
-        clearSelection();
+        const currentJobPageIndex = currentJob.pages.findIndex((p) => p.id === selected.pageId);
+        const currentJobPage = currentJobPageIndex !== -1 ? currentJob.pages[currentJobPageIndex] : currentJob.pages[0];
+        const currentEl = currentJobPage?.elements.find((el) => el.id === selected.elementId);
+
+        let matchedPage = currentJobPageIndex !== -1 && nextJob.pages[currentJobPageIndex]
+          ? nextJob.pages[currentJobPageIndex]
+          : nextJob.pages[0];
+        let matchingEl = matchedPage?.elements.find((el) =>
+          (currentEl?.rowId && el.rowId === currentEl.rowId) ||
+          (currentEl?.assetId && el.assetId === currentEl.assetId)
+        );
+        if (!matchingEl) {
+          for (const p of nextJob.pages) {
+            matchingEl = p.elements.find((el) =>
+              (currentEl?.rowId && el.rowId === currentEl.rowId) ||
+              (currentEl?.assetId && el.assetId === currentEl.assetId)
+            );
+            if (matchingEl) {
+              matchedPage = p;
+              break;
+            }
+          }
+        }
+
+        if (matchingEl && matchedPage) {
+          useUiStore.getState().select({ pageId: matchedPage.id, elementId: matchingEl.id });
+        } else {
+          clearSelection();
+        }
       }
     } else if (selectedPageId && selectedIds.length > 0) {
       const page = nextJob.pages.find((p) => p.id === selectedPageId);
@@ -554,7 +627,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
 
     if (activePageId && !nextJob.pages.some((p) => p.id === activePageId)) {
-      setActivePage(nextJob.pages[0]?.id || null);
+      const activeIdx = currentJob.pages.findIndex((p) => p.id === activePageId);
+      const targetPage = activeIdx !== -1 && nextJob.pages[activeIdx]
+        ? nextJob.pages[activeIdx]
+        : nextJob.pages[0];
+      setActivePage(targetPage?.id || null);
     }
   },
 
@@ -676,15 +753,229 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }));
   },
 
+  addBackPage: (jobId: string, frontPageId: string) => {
+    const job = get().jobs.find((j) => j.id === jobId);
+    if (!job) return null;
+
+    const frontIndex = job.pages.findIndex((p) => p.id === frontPageId);
+    if (frontIndex === -1) return null;
+    const frontPage = job.pages[frontIndex];
+    if (frontPage.backPageId) {
+      return frontPage.backPageId;
+    }
+
+    get().commit(jobId);
+
+    const backPageId = nanoid();
+    const newBackPage: Page = {
+      id: backPageId,
+      paperId: frontPage.paperId,
+      orientation: frontPage.orientation,
+      elements: [],
+      isBack: true,
+      frontPageId: frontPage.id,
+      flipMode: 'sideways',
+      seeFront: true,
+      stayPut: true,
+    };
+
+    set((state) => ({
+      jobs: state.jobs.map((j) => {
+        if (j.id !== jobId) return j;
+        const newPages = [...j.pages];
+        const updatedFront: Page = { ...frontPage, backPageId };
+        newPages[frontIndex] = updatedFront;
+        newPages.splice(frontIndex + 1, 0, newBackPage);
+        return {
+          ...j,
+          pages: newPages,
+        };
+      }),
+    }));
+
+    return backPageId;
+  },
+
+  removeBackPage: (jobId: string, backPageId: string) => {
+    const job = get().jobs.find((j) => j.id === jobId);
+    if (!job) return;
+
+    const backPage = job.pages.find((p) => p.id === backPageId);
+    if (!backPage) return;
+
+    get().commit(jobId);
+
+    set((state) => ({
+      jobs: state.jobs.map((j) => {
+        if (j.id !== jobId) return j;
+        const updatedPages = j.pages
+          .filter((p) => p.id !== backPageId)
+          .map((p) => (p.backPageId === backPageId ? { ...p, backPageId: undefined } : p));
+        return {
+          ...j,
+          pages: updatedPages,
+        };
+      }),
+    }));
+  },
+
+  setPageFlipMode: (jobId: string, pageId: string, flipMode: 'sideways' | 'upward') => {
+    get().commit(jobId);
+    set((state) => ({
+      jobs: state.jobs.map((j) => {
+        if (j.id !== jobId) return j;
+        return {
+          ...j,
+          pages: j.pages.map((p) => (p.id === pageId ? { ...p, flipMode } : p)),
+        };
+      }),
+    }));
+  },
+
+  setPageSeeFront: (jobId: string, pageId: string, seeFront: boolean) => {
+    set((state) => ({
+      jobs: state.jobs.map((j) => {
+        if (j.id !== jobId) return j;
+        return {
+          ...j,
+          pages: j.pages.map((p) => (p.id === pageId ? { ...p, seeFront } : p)),
+        };
+      }),
+    }));
+  },
+
+  fillAllSlots: (jobId: string, backPageId: string, assetId: string) => {
+    const job = get().jobs.find((j) => j.id === jobId);
+    if (!job) return;
+
+    const backPage = job.pages.find((p) => p.id === backPageId);
+    if (!backPage || !backPage.isBack || !backPage.frontPageId) return;
+
+    const frontPage = job.pages.find((p) => p.id === backPage.frontPageId);
+    if (!frontPage) return;
+
+    const occupiedSlotIds = new Set(
+      backPage.elements.map((el) => el.frontElementId).filter(Boolean) as string[]
+    );
+
+    const emptySlots = frontPage.elements.filter(
+      (el) => !occupiedSlotIds.has(el.id)
+    );
+
+    if (emptySlots.length === 0) return;
+
+    get().commit(jobId);
+
+    const newElements: PageElement[] = emptySlots.map((slot) => ({
+      id: nanoid(),
+      type: 'image',
+      assetId,
+      xMm: slot.xMm,
+      yMm: slot.yMm,
+      wMm: slot.wMm,
+      hMm: slot.hMm,
+      rotation: slot.rotation,
+      fit: 'cover',
+      frontElementId: slot.id,
+    }));
+
+    set((state) => ({
+      jobs: state.jobs.map((j) => {
+        if (j.id !== jobId) return j;
+        return {
+          ...j,
+          pages: j.pages.map((p) =>
+            p.id === backPageId
+              ? {
+                  ...p,
+                  elements: [...p.elements, ...newElements],
+                  stayPut: true,
+                }
+              : p
+          ),
+        };
+      }),
+    }));
+  },
+
+  matchFrontSlots: (jobId: string, backPageId: string) => {
+    const job = get().jobs.find((j) => j.id === jobId);
+    if (!job) return;
+
+    const backPage = job.pages.find((p) => p.id === backPageId);
+    if (!backPage || !backPage.isBack || !backPage.frontPageId) return;
+
+    const frontPage = job.pages.find((p) => p.id === backPage.frontPageId);
+    if (!frontPage) return;
+
+    const frontMap = new Map(frontPage.elements.map((el) => [el.id, el]));
+
+    let changed = false;
+    const updatedElements = backPage.elements.map((el) => {
+      if (!el.frontElementId) return el;
+      const frontEl = frontMap.get(el.frontElementId);
+      if (!frontEl) return el;
+      if (
+        el.xMm !== frontEl.xMm ||
+        el.yMm !== frontEl.yMm ||
+        el.wMm !== frontEl.wMm ||
+        el.hMm !== frontEl.hMm
+      ) {
+        changed = true;
+        return {
+          ...el,
+          xMm: frontEl.xMm,
+          yMm: frontEl.yMm,
+          wMm: frontEl.wMm,
+          hMm: frontEl.hMm,
+        };
+      }
+      return el;
+    });
+
+    if (!changed) return;
+
+    get().commit(jobId);
+
+    set((state) => ({
+      jobs: state.jobs.map((j) => {
+        if (j.id !== jobId) return j;
+        return {
+          ...j,
+          pages: j.pages.map((p) =>
+            p.id === backPageId ? { ...p, elements: updatedElements, stayPut: true } : p
+          ),
+        };
+      }),
+    }));
+  },
+
   removePage: (jobId: string, pageId: string) => {
     const job = get().jobs.find((j) => j.id === jobId);
     if (!job) return;
+
+    const targetPage = job.pages.find((p) => p.id === pageId);
+    if (!targetPage) return;
 
     get().commit(jobId);
     set((state) => ({
       jobs: state.jobs.map((j) => {
         if (j.id !== jobId) return j;
-        const remaining = j.pages.filter((p) => p.id !== pageId);
+
+        const idsToRemove = new Set<string>([pageId]);
+        if (targetPage.backPageId) {
+          idsToRemove.add(targetPage.backPageId);
+        }
+
+        const remaining = j.pages
+          .filter((p) => !idsToRemove.has(p.id))
+          .map((p) => {
+            if (p.backPageId === pageId) {
+              return { ...p, backPageId: undefined };
+            }
+            return p;
+          });
+
         if (remaining.length === 0) {
           const firstPage = j.pages[0];
           return {
@@ -1372,6 +1663,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         qty: 1,
         fillPage: false,
         crop: sourceRow ? Boolean(sourceRow.crop) : false,
+        cropRect: sourceRow?.cropRect || element.cropRect,
       };
 
       const updatedRows = [...existingRows, newRow];
@@ -1521,7 +1813,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     fromPageId: string,
     toPageId: string,
     elementId: string,
-    pos?: { xMm: number; yMm: number }
+    pos?: { xMm: number; yMm: number; wMm?: number; hMm?: number; frontElementId?: string | null }
   ) => {
     if (fromPageId === toPageId) return;
     const state = get();
@@ -1538,11 +1830,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const { wMm: toPageW, hMm: toPageH } = getPageDimensionsMm(toPage);
     const targetX = pos !== undefined ? pos.xMm : element.xMm;
     const targetY = pos !== undefined ? pos.yMm : element.yMm;
+    const targetW = pos?.wMm !== undefined ? pos.wMm : element.wMm;
+    const targetH = pos?.hMm !== undefined ? pos.hMm : element.hMm;
     const clamped = clampToPage(
       targetX,
       targetY,
-      element.wMm,
-      element.hMm,
+      targetW,
+      targetH,
       toPageW,
       toPageH
     );
@@ -1551,6 +1845,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       ...element,
       xMm: clamped.x,
       yMm: clamped.y,
+      wMm: targetW,
+      hMm: targetH,
+      ...(pos?.frontElementId !== undefined ? { frontElementId: pos.frontElementId ?? undefined } : {}),
     };
 
     set((s) => ({
@@ -2157,9 +2454,15 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         for (const rId of targetRowIds) {
           const rowIdx = nextRows.findIndex((r) => r.id === rId);
           if (rowIdx >= 0) {
+            const oldRow = nextRows[rowIdx];
+            const asset = state.assets.find((a) => a.id === oldRow.assetId);
+            const nextCrop = oldRow.cropRect && asset && asset.pxW > 0 && asset.pxH > 0
+              ? refitCropRectToRatio(oldRow.cropRect, asset.pxW, asset.pxH, spec.size.wMm / spec.size.hMm)
+              : oldRow.cropRect;
             nextRows[rowIdx] = {
-              ...nextRows[rowIdx],
+              ...oldRow,
               size: spec.size,
+              cropRect: nextCrop,
             };
           }
         }
@@ -2177,6 +2480,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
             const firstIdx = matchingIndices[0];
             const totalQty = matchingIndices.reduce((sum, idx) => sum + (nextRows[idx].qty || 1), 0);
             const firstRow = nextRows[firstIdx];
+            const asset = state.assets.find((a) => a.id === firstRow.assetId);
+            const nextCrop = firstRow.cropRect && asset && asset.pxW > 0 && asset.pxH > 0
+              ? refitCropRectToRatio(firstRow.cropRect, asset.pxW, asset.pxH, spec.size.wMm / spec.size.hMm)
+              : firstRow.cropRect;
             for (let i = matchingIndices.length - 1; i > 0; i--) {
               nextRows.splice(matchingIndices[i], 1);
             }
@@ -2186,6 +2493,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
               qty: totalQty,
               fillPage: false,
               crop: false,
+              cropRect: nextCrop,
             };
           } else {
             nextRows.push({
@@ -2998,11 +3306,17 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       for (const rId of targetRowIds) {
         const rowIdx = nextRows.findIndex((r) => r.id === rId);
         if (rowIdx >= 0) {
+          const oldRow = nextRows[rowIdx];
+          const asset = state.assets.find((a) => a.id === oldRow.assetId);
+          const nextCrop = oldRow.cropRect && asset && asset.pxW > 0 && asset.pxH > 0
+            ? refitCropRectToRatio(oldRow.cropRect, asset.pxW, asset.pxH, size.wMm / size.hMm)
+            : oldRow.cropRect;
           nextRows[rowIdx] = {
-            ...nextRows[rowIdx],
+            ...oldRow,
             size,
             qty: clampedQty,
             fillPage: false,
+            cropRect: nextCrop,
           };
         }
       }
@@ -3017,6 +3331,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         if (matchingIndices.length > 0) {
           const firstIdx = matchingIndices[0];
           const firstRow = nextRows[firstIdx];
+          const asset = state.assets.find((a) => a.id === firstRow.assetId);
+          const nextCrop = firstRow.cropRect && asset && asset.pxW > 0 && asset.pxH > 0
+            ? refitCropRectToRatio(firstRow.cropRect, asset.pxW, asset.pxH, size.wMm / size.hMm)
+            : firstRow.cropRect;
           for (let i = matchingIndices.length - 1; i > 0; i--) {
             nextRows.splice(matchingIndices[i], 1);
           }
@@ -3025,6 +3343,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
             size,
             qty: clampedQty,
             fillPage: false,
+            cropRect: nextCrop,
           };
         } else {
           nextRows.push({
@@ -3147,6 +3466,292 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       checkAndClearSelection();
     }
     return 'ok';
+  },
+
+  applyVariantCrop: (
+    jobId: string,
+    target: PictureTarget,
+    cropRect: { x: number; y: number; w: number; h: number } | null
+  ) => {
+    const state = get();
+    const job = state.jobs.find((j) => j.id === jobId);
+    if (!job) return;
+
+    state.commit(jobId);
+
+    const { assetIds: targetAssetIds, rowIds: targetRowIds } = parsePictureTarget(target);
+    const isReset =
+      !cropRect ||
+      (cropRect.x <= 0.001 &&
+        cropRect.y <= 0.001 &&
+        cropRect.w >= 0.999 &&
+        cropRect.h >= 0.999);
+    const finalCropRect = isReset ? undefined : cropRect;
+
+    // 1. Update blocks
+    let updatedBlocks = (job.blocks || []).map((block) => {
+      let changed = false;
+      let nextRows = block.rows;
+
+      if (block.rows && block.rows.length > 0) {
+        nextRows = block.rows.map((r) => {
+          const matches =
+            (targetRowIds && targetRowIds.length > 0 && r.id && targetRowIds.includes(r.id)) ||
+            (targetAssetIds.includes(r.assetId));
+          if (!matches) return r;
+          changed = true;
+          return {
+            ...r,
+            cropRect: finalCropRect,
+          };
+        });
+      } else if (block.kind === 'fit' && targetAssetIds.includes(block.assetIds[0])) {
+        changed = true;
+        if (isReset) {
+          nextRows = undefined;
+        } else {
+          nextRows = [
+            {
+              id: nanoid(),
+              assetId: block.assetIds[0],
+              size: { id: 'default', wMm: 0, hMm: 0 },
+              qty: 1,
+              cropRect: finalCropRect,
+            },
+          ];
+        }
+      }
+
+      if (!changed) return block;
+      return {
+        ...block,
+        rows: nextRows,
+        generatedSig: '',
+      };
+    });
+
+    // 2. Check if target variant is Default
+    const isTargetDefault = updatedBlocks.some((b) => {
+      if (b.kind === 'fit' && b.assetIds.some((id) => targetAssetIds.includes(id))) return true;
+      if (
+        b.rows?.some((r) => {
+          const matches =
+            (targetRowIds && targetRowIds.length > 0 && r.id && targetRowIds.includes(r.id)) ||
+            targetAssetIds.includes(r.assetId);
+          return matches && r.size.id === 'default';
+        })
+      ) {
+        return true;
+      }
+      return false;
+    });
+
+    // 3. Update pages
+    const hasStayPutPages = job.pages.some((p) => isPageStayPut(p, job));
+
+    let updatedPages = job.pages;
+
+    if (isTargetDefault && !hasStayPutPages) {
+      // Auto-tidy layout for default variant
+      const ctx = ctxForJob({ ...job, blocks: updatedBlocks }, state.assets);
+      updatedPages = updatedBlocks.flatMap((b) => {
+        const pgs = generateBlockPages(b, ctx);
+        b.generatedSig = blockSignature(pgs);
+        return pgs;
+      });
+    } else {
+      // Sized variant or stay-put mode
+      updatedPages = job.pages.map((p) => {
+        const hasTarget = p.elements.some((el) => {
+          return (
+            (targetRowIds && targetRowIds.length > 0 && el.rowId && targetRowIds.includes(el.rowId)) ||
+            (el.assetId && targetAssetIds.includes(el.assetId))
+          );
+        });
+        if (!hasTarget) return p;
+
+        const { wMm: pW, hMm: pH } = getPageDimensionsMm(p);
+        const effectiveMargin = job.settings.borderless ? 0 : job.settings.marginMm;
+        const pRect = printableRect(pW, pH, effectiveMargin);
+
+        const newElements = p.elements.map((el) => {
+          const matches =
+            (targetRowIds && targetRowIds.length > 0 && el.rowId && targetRowIds.includes(el.rowId)) ||
+            (el.assetId && targetAssetIds.includes(el.assetId));
+          if (!matches) return el;
+
+          if (isTargetDefault) {
+            const asset = state.assets.find((a) => a.id === el.assetId);
+            const crW = finalCropRect ? finalCropRect.w : 1;
+            const crH = finalCropRect ? finalCropRect.h : 1;
+            const croppedPxW = (asset?.pxW || 1) * crW;
+            const croppedPxH = (asset?.pxH || 1) * crH;
+            const croppedAr = croppedPxW / croppedPxH;
+
+            let newW: number;
+            let newH: number;
+            let clampedX: number;
+            let clampedY: number;
+
+            if (isReset) {
+              if (croppedAr >= pRect.w / pRect.h) {
+                newW = pRect.w;
+                newH = pRect.w / croppedAr;
+              } else {
+                newH = pRect.h;
+                newW = pRect.h * croppedAr;
+              }
+              clampedX = pRect.x + (pRect.w - newW) / 2;
+              clampedY = pRect.y + (pRect.h - newH) / 2;
+            } else {
+              const cx = el.xMm + el.wMm / 2;
+              const cy = el.yMm + el.hMm / 2;
+
+              newW = el.wMm;
+              newH = newW / croppedAr;
+              if (newH > pRect.h) {
+                newH = pRect.h;
+                newW = newH * croppedAr;
+              }
+              if (newW > pRect.w) {
+                newW = pRect.w;
+                newH = newW / croppedAr;
+              }
+
+              clampedX = Math.max(pRect.x, Math.min(cx - newW / 2, pRect.x + pRect.w - newW));
+              clampedY = Math.max(pRect.y, Math.min(cy - newH / 2, pRect.y + pRect.h - newH));
+            }
+
+            return {
+              ...el,
+              xMm: Math.round(clampedX * 100) / 100,
+              yMm: Math.round(clampedY * 100) / 100,
+              wMm: Math.round(newW * 100) / 100,
+              hMm: Math.round(newH * 100) / 100,
+              cropRect: finalCropRect,
+            };
+          }
+
+          // Sized variant: exact box dimensions remain unchanged
+          return {
+            ...el,
+            cropRect: finalCropRect,
+          };
+        });
+
+        return {
+          ...p,
+          elements: newElements,
+        };
+      });
+    }
+
+    set((s) => ({
+      jobs: s.jobs.map((j) =>
+        j.id === jobId
+          ? {
+              ...j,
+              blocks: updatedBlocks,
+              pages: updatedPages,
+            }
+          : j
+      ),
+    }));
+
+    const matchingEls = updatedPages.flatMap((p) => p.elements).filter((el) => {
+      return (
+        (targetRowIds && targetRowIds.length > 0 && el.rowId && targetRowIds.includes(el.rowId)) ||
+        (el.assetId && targetAssetIds.includes(el.assetId))
+      );
+    });
+    if (matchingEls.length > 0) {
+      const firstEl = matchingEls[0];
+      const pageWithEl = updatedPages.find((p) => p.elements.some((e) => e.id === firstEl.id));
+      if (pageWithEl) {
+        useUiStore.getState().setActivePage(pageWithEl.id);
+        if (matchingEls.length === 1) {
+          useUiStore.getState().select({ pageId: pageWithEl.id, elementId: firstEl.id });
+        } else {
+          useUiStore.getState().setSelection(pageWithEl.id, matchingEls.map((e) => e.id));
+        }
+      }
+    }
+  },
+
+  refitDefaultElements: () => {
+    set((state) => {
+      let changed = false;
+      const nextJobs = state.jobs.map((job) => {
+        let jobChanged = false;
+        const nextPages = job.pages.map((page) => {
+          const { wMm: pW, hMm: pH } = getPageDimensionsMm(page);
+          const effectiveMargin = job.settings.borderless ? 0 : job.settings.marginMm;
+          const pRect = printableRect(pW, pH, effectiveMargin);
+
+          let pageChanged = false;
+          const nextElements = page.elements.map((el) => {
+            if (el.type !== 'image' || !el.assetId) return el;
+            const asset = state.assets.find((a) => a.id === el.assetId);
+            if (!asset || asset.pxW <= 0 || asset.pxH <= 0) return el;
+
+            const block = job.blocks?.find((b) => b.id === page.blockId);
+            const row = block?.kind === 'sheet' && block.rows
+              ? (el.rowId ? block.rows.find((r) => r.id === el.rowId) : block.rows.find((r) => r.assetId === el.assetId))
+              : undefined;
+
+            const isDefault =
+              (block && block.kind === 'fit') ||
+              (row && row.size.id === 'default') ||
+              (!row && !el.rowId);
+
+            if (!isDefault) return el;
+
+            const expectedAr = el.cropRect
+              ? (asset.pxW * el.cropRect.w) / (asset.pxH * el.cropRect.h)
+              : asset.pxW / asset.pxH;
+
+            const currentAr = el.wMm / el.hMm;
+            const ratioDiff = Math.abs(currentAr - expectedAr);
+            const wrongRotation = (el.rotation || 0) !== 0;
+
+            if (ratioDiff > 0.01 || wrongRotation) {
+              pageChanged = true;
+              jobChanged = true;
+              changed = true;
+
+              let newW: number;
+              let newH: number;
+              if (expectedAr >= pRect.w / pRect.h) {
+                newW = pRect.w;
+                newH = pRect.w / expectedAr;
+              } else {
+                newH = pRect.h;
+                newW = pRect.h * expectedAr;
+              }
+
+              const newX = pRect.x + (pRect.w - newW) / 2;
+              const newY = pRect.y + (pRect.h - newH) / 2;
+
+              return {
+                ...el,
+                xMm: Math.round(newX * 100) / 100,
+                yMm: Math.round(newY * 100) / 100,
+                wMm: Math.round(newW * 100) / 100,
+                hMm: Math.round(newH * 100) / 100,
+                rotation: 0 as const,
+              };
+            }
+            return el;
+          });
+
+          return pageChanged ? { ...page, elements: nextElements } : page;
+        });
+
+        return jobChanged ? { ...job, pages: nextPages } : job;
+      });
+
+      return changed ? { jobs: nextJobs } : {};
+    });
   },
 
   addAssets: (newAssets: ImageAsset[], jobId?: string) => {

@@ -122,8 +122,8 @@ export function ElementBox({
   } | null>(null);
 
   type DropTarget =
-    | { type: 'same-page'; xMm: number; yMm: number }
-    | { type: 'other-page'; pageId: string; xMm: number; yMm: number }
+    | { type: 'same-page'; xMm: number; yMm: number; wMm?: number; hMm?: number; frontElementId?: string | null }
+    | { type: 'other-page'; pageId: string; xMm: number; yMm: number; wMm?: number; hMm?: number; frontElementId?: string | null }
     | { type: 'new-page' }
     | { type: 'none' };
 
@@ -324,6 +324,45 @@ export function ElementBox({
           const wMm = dragStart.origW;
           const hMm = dragStart.origH;
 
+          if (page.isBack) {
+            const activeJob = useSessionStore.getState().jobs.find((j) => j.id === jobId);
+            const frontPage = activeJob?.pages.find((p) => p.id === page.frontPageId);
+            if (frontPage) {
+              const otherOccupied = new Set(
+                page.elements
+                  .filter((el) => el.id !== element.id)
+                  .map((el) => el.frontElementId)
+                  .filter(Boolean) as string[]
+              );
+              const candidateSlots = frontPage.elements.filter(
+                (s) => !otherOccupied.has(s.id)
+              );
+              const snapSlot = candidateSlots.find((s) => {
+                const dx = Math.abs(s.xMm - rawX);
+                const dy = Math.abs(s.yMm - rawY);
+                return dx <= 3 && dy <= 3;
+              });
+              if (snapSlot) {
+                clearGuides();
+                dropTargetRef.current = {
+                  type: 'same-page',
+                  xMm: snapSlot.xMm,
+                  yMm: snapSlot.yMm,
+                  wMm: snapSlot.wMm,
+                  hMm: snapSlot.hMm,
+                  frontElementId: snapSlot.id,
+                };
+                setDraft({
+                  xMm: snapSlot.xMm,
+                  yMm: snapSlot.yMm,
+                  wMm: snapSlot.wMm,
+                  hMm: snapSlot.hMm,
+                });
+                return;
+              }
+            }
+          }
+
           if (altKey) {
             clearGuides();
             const clamped = clampToPage(rawX, rawY, wMm, hMm, pageW, pageH, minSizeMm);
@@ -331,6 +370,9 @@ export function ElementBox({
               type: 'same-page',
               xMm: clamped.x,
               yMm: clamped.y,
+              wMm,
+              hMm,
+              frontElementId: null,
             };
             setDraft({ xMm: clamped.x, yMm: clamped.y, wMm, hMm });
           } else {
@@ -352,6 +394,9 @@ export function ElementBox({
               type: 'same-page',
               xMm: snapped.x,
               yMm: snapped.y,
+              wMm,
+              hMm,
+              frontElementId: null,
             };
             setDraft({ xMm: snapped.x, yMm: snapped.y, wMm, hMm });
           }
@@ -376,6 +421,36 @@ export function ElementBox({
             const maxXMm = Math.max(0, tPageW - element.wMm);
             const maxYMm = Math.max(0, tPageH - element.hMm);
 
+            if (targetPage.isBack) {
+              const tFrontPage = job?.pages.find((p) => p.id === targetPage.frontPageId);
+              if (tFrontPage) {
+                const tOtherOccupied = new Set(
+                  targetPage.elements.map((el) => el.frontElementId).filter(Boolean) as string[]
+                );
+                const candidateSlots = tFrontPage.elements.filter(
+                  (s) => !tOtherOccupied.has(s.id)
+                );
+                const snapSlot = candidateSlots.find((s) => {
+                  const dx = Math.abs(s.xMm - rawX);
+                  const dy = Math.abs(s.yMm - rawY);
+                  return dx <= 3 && dy <= 3;
+                });
+                if (snapSlot) {
+                  clearGuides();
+                  dropTargetRef.current = {
+                    type: 'other-page',
+                    pageId: targetPageId,
+                    xMm: snapSlot.xMm,
+                    yMm: snapSlot.yMm,
+                    wMm: snapSlot.wMm,
+                    hMm: snapSlot.hMm,
+                    frontElementId: snapSlot.id,
+                  };
+                  return;
+                }
+              }
+            }
+
             if (altKey) {
               clearGuides();
               const clampedX = Math.max(0, Math.min(maxXMm, rawX));
@@ -385,6 +460,9 @@ export function ElementBox({
                 pageId: targetPageId,
                 xMm: clampedX,
                 yMm: clampedY,
+                wMm: element.wMm,
+                hMm: element.hMm,
+                frontElementId: null,
               };
             } else {
               const otherRects = targetPage.elements.map((el) => ({
@@ -411,6 +489,9 @@ export function ElementBox({
                 pageId: targetPageId,
                 xMm: clampedX,
                 yMm: clampedY,
+                wMm: element.wMm,
+                hMm: element.hMm,
+                frontElementId: null,
               };
             }
           }
@@ -714,17 +795,36 @@ export function ElementBox({
 
     if (hasMoved) {
       if (target.type === 'same-page') {
-        if (target.xMm !== element.xMm || target.yMm !== element.yMm) {
-          updateElement(jobId, page.id, element.id, {
+        const hasGeomChange =
+          target.xMm !== element.xMm ||
+          target.yMm !== element.yMm ||
+          (target.wMm !== undefined && target.wMm !== element.wMm) ||
+          (target.hMm !== undefined && target.hMm !== element.hMm);
+        const hasSlotChange =
+          'frontElementId' in target && (target.frontElementId ?? undefined) !== element.frontElementId;
+
+        if (hasGeomChange || hasSlotChange) {
+          const patch: Partial<PageElement> = {
             xMm: target.xMm,
             yMm: target.yMm,
-          });
+          };
+          if (target.wMm !== undefined) {
+            patch.wMm = target.wMm;
+            patch.hMm = target.hMm;
+          }
+          if ('frontElementId' in target) {
+            patch.frontElementId = target.frontElementId ?? undefined;
+          }
+          updateElement(jobId, page.id, element.id, patch);
         }
       } else if (target.type === 'other-page') {
         const { moveElementToPage } = useSessionStore.getState();
         moveElementToPage(jobId, page.id, target.pageId, element.id, {
           xMm: target.xMm,
           yMm: target.yMm,
+          wMm: target.wMm,
+          hMm: target.hMm,
+          frontElementId: target.frontElementId ?? undefined,
         });
         const targetPageEl = document.querySelector(
           `[data-page-id="${target.pageId}"]`
@@ -1001,6 +1101,37 @@ export function ElementBox({
       e.stopPropagation();
       onSelect();
       setEditingElement({ pageId: page.id, elementId: element.id });
+    } else if (element.type === 'image' && asset) {
+      e.stopPropagation();
+      onSelect();
+      const currentJob = useSessionStore.getState().jobs.find((j) => j.id === jobId);
+      const activeBlock = currentJob?.blocks?.find((b) => b.id === page.blockId);
+      const activeRow = activeBlock?.kind === 'sheet'
+        ? ((element.rowId ? activeBlock.rows?.find((r) => r.id === element.rowId) : undefined) ||
+           activeBlock.rows?.find((r) => r.assetId === element.assetId))
+        : undefined;
+
+      const isExplicitSized = activeRow?.size?.id ? activeRow.size.id !== 'default' : false;
+      const isRatioDifferent =
+        element.wMm > 0 && element.hMm > 0 && asset && asset.pxW && asset.pxH
+          ? Math.abs(element.wMm / element.hMm - asset.pxW / asset.pxH) > 0.01
+          : false;
+      const isSized = isExplicitSized || isRatioDifferent;
+      const sizeName = activeRow?.size?.id
+        ? (activeRow.size.id === 'wallet' ? 'Wallet' : activeRow.size.id)
+        : isRatioDifferent
+        ? (Math.abs(element.wMm / element.hMm - 1) < 0.05 ? '1x1' : undefined)
+        : undefined;
+
+      useUiStore.getState().openCropModal({
+        jobId,
+        target: element.rowId ? { rowIds: [element.rowId] } : { assetIds: [element.assetId!] },
+        asset,
+        element,
+        initialCropRect: element.cropRect || activeRow?.cropRect,
+        isSizedVariant: isSized,
+        sizeName,
+      });
     }
   };
 

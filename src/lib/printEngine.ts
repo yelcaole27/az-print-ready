@@ -1,39 +1,45 @@
 import { useUiStore } from '@/store/useUiStore';
-import { getOutputPageIndexes } from './outputManager';
+import { getOutputPageIndexes, type OutputOptions } from './outputManager';
 import { loadPagePrintImages } from './printImageLoader';
 
 let isPrinting = false;
 
-export async function executePrint(): Promise<void> {
+export async function executePrint(options?: OutputOptions): Promise<void> {
   if (isPrinting) return;
   isPrinting = true;
 
-  const { setOutputMode, setMessage, setAssetSrcOverrides } = useUiStore.getState();
+  const { setMessage } = useUiStore.getState();
 
   // Close any open toast before print dialog opens
   setMessage(null);
 
   // Load 300 DPI original pictures for the pages being printed
-  const outputData = getOutputPageIndexes();
-  let printCleanup: (() => void) | null = null;
-
-  if (outputData && outputData.pageIndexes.length > 0) {
-    const allElements = outputData.pageIndexes.flatMap(
-      (idx) => outputData.job.pages[idx]?.elements || []
-    );
-    const printImages = await loadPagePrintImages(
-      allElements,
-      outputData.assetsById,
-      { asDataUrl: false, warnOnFallback: true }
-    );
-    setAssetSrcOverrides(printImages.overrides);
-    printCleanup = printImages.cleanup;
+  const outputData = getOutputPageIndexes(options);
+  if (!outputData || outputData.pageIndexes.length === 0) {
+    isPrinting = false;
+    return;
   }
 
-  // 1. Mount print root
-  setOutputMode('print');
+  let printCleanup: (() => void) | null = null;
+  const allElements = outputData.pageIndexes.flatMap(
+    (idx) => outputData.job.pages[idx]?.elements || []
+  );
+  const printImages = await loadPagePrintImages(
+    allElements,
+    outputData.assetsById,
+    { asDataUrl: false, warnOnFallback: true }
+  );
+  printCleanup = printImages.cleanup;
 
-  // 2. Wait 2 animation frames for DOM rendering
+  // 1. Mount print root with the exact output target pages atomically
+  useUiStore.setState({
+    outputJob: outputData.job,
+    outputPageIndexes: outputData.pageIndexes,
+    assetSrcOverrides: printImages.overrides,
+    outputMode: 'print',
+  });
+
+  // 2. Wait 2 animation frames for DOM rendering and React commit
   await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
 
   // 3. Wait for document.fonts.ready
@@ -62,26 +68,35 @@ export async function executePrint(): Promise<void> {
     );
   }
 
-  // 5. Cleanup listener on window.onafterprint
+  // Wait an extra animation frame after image decoding to ensure layout repaint
+  await new Promise((r) => requestAnimationFrame(r));
+
+  // 5. Cleanup listener on window.onafterprint or window focus
+  let cleanedUp = false;
   const cleanup = () => {
+    if (cleanedUp) return;
+    cleanedUp = true;
     window.removeEventListener('afterprint', cleanup);
+    window.removeEventListener('focus', focusCleanup);
     isPrinting = false;
     if (printCleanup) {
       printCleanup();
       printCleanup = null;
     }
-    setAssetSrcOverrides(null);
-    setOutputMode(null);
+    useUiStore.setState({
+      assetSrcOverrides: null,
+      outputMode: null,
+      outputJob: null,
+      outputPageIndexes: [],
+    });
+  };
+
+  const focusCleanup = () => {
+    setTimeout(cleanup, 500);
   };
 
   window.addEventListener('afterprint', cleanup, { once: true });
-
-  // Fallback cleanup after print dialog opens or completes
-  setTimeout(() => {
-    if (isPrinting) {
-      cleanup();
-    }
-  }, 3000);
+  window.addEventListener('focus', focusCleanup, { once: true });
 
   // 6. Trigger native print dialog directly
   window.print();

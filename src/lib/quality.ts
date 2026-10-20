@@ -14,17 +14,20 @@ export function getEffectiveDpi(
 ): number {
   if (!asset || asset.pxW <= 0 || asset.pxH <= 0) return 0;
 
-  if (element.crop) {
-    const scale = Math.max(
-      element.wMm / (element.crop.w * asset.pxW),
-      element.hMm / (element.crop.h * asset.pxH)
-    );
+  const crop = element.cropRect || element.crop;
+  const isRotated = element.rotation === 90 || element.rotation === 270;
+  const cellW_mm = isRotated ? element.hMm : element.wMm;
+  const cellH_mm = isRotated ? element.wMm : element.hMm;
+
+  if (crop) {
+    const croppedPxW = asset.pxW * (crop.w || 1);
+    const croppedPxH = asset.pxH * (crop.h || 1);
+    const scale =
+      element.fit === 'contain'
+        ? Math.min(cellW_mm / croppedPxW, cellH_mm / croppedPxH)
+        : Math.max(cellW_mm / croppedPxW, cellH_mm / croppedPxH);
     return scale > 0 ? 25.4 / scale : 0;
   }
-
-  const rotation = element.rotation || 0;
-  const cellW_mm = rotation === 90 ? element.hMm : element.wMm;
-  const cellH_mm = rotation === 90 ? element.wMm : element.hMm;
 
   const scale =
     element.fit === 'contain'

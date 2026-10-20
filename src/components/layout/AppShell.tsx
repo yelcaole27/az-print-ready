@@ -15,13 +15,19 @@ import { newTextPage } from '@/lib/textActions';
 import { PrintView } from '@/components/output/PrintView';
 import { CheckNotice } from '@/components/output/CheckNotice';
 import { ExportProgress } from '@/components/output/ExportProgress';
-import { requestPrint, requestExportPdf, startExportPdf, confirmNotice, cancelExportPdf, getOutputPageIndexes } from '@/lib/outputManager';
+import { requestPrint, requestExportPdf, startExportPdf, confirmNotice, cancelExportPdf, getOutputPageIndexes, executePrintWithOptions, startExportPdfWithOptions, executePrintTestSheet } from '@/lib/outputManager';
 import { loadPagePrintImages } from '@/lib/printImageLoader';
 import { ArrangeModal } from '@/components/modals/ArrangeModal';
 import { LayoutModal } from '@/components/modals/LayoutModal';
 import { ChangeLayoutModal } from '@/components/modals/ChangeLayoutModal';
 import { SettingsModal } from '@/components/modals/SettingsModal';
 import { ConfirmModal } from '@/components/modals/ConfirmModal';
+import { PrintChooserModal } from '@/components/modals/PrintChooserModal';
+import { CropModal } from '@/components/modals/CropModal';
+import type { PageElement } from '@/types';
+import { getBackNudge, setBackNudge, resetBackNudge } from '@/lib/backNudge';
+import { mirrorPageForOutput } from '@/lib/backMirror';
+import { generateTestSheetJob } from '@/lib/testSheet';
 import {
   copySelection,
   cutSelection,
@@ -36,18 +42,27 @@ export function AppShell() {
   const { jobs, assets } = useSessionStore();
   const { initTheme } = useUiStore();
 
-  // Initialize theme listener and load stored theme on mount
+  // Initialize theme listener, refit default elements, and load stored theme on mount
   useEffect(() => {
     initTheme();
-    if (typeof window !== 'undefined') {
+    useSessionStore.getState().refitDefaultElements();
+    if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
       (window as any).__AZ_TEST__ = {
         useSessionStore,
         useUiStore,
         requestPrint,
         requestExportPdf,
         startExportPdf,
+        executePrintWithOptions,
+        startExportPdfWithOptions,
+        executePrintTestSheet,
         getOutputPageIndexes,
         loadPagePrintImages,
+        getBackNudge,
+        setBackNudge,
+        resetBackNudge,
+        mirrorPageForOutput,
+        generateTestSheetJob,
         importFiles,
         copySelection,
         cutSelection,
@@ -201,6 +216,63 @@ export function AppShell() {
             e.preventDefault();
           }
         }
+      } else {
+        if (!e.altKey && e.key.toLowerCase() === 'r') {
+          const uiState = useUiStore.getState();
+          const sessionState = useSessionStore.getState();
+          const activeJob =
+            sessionState.jobs.find((j) => j.id === sessionState.activeJobId) ||
+            sessionState.jobs[0];
+          if (!activeJob) return;
+
+          let targetEl: PageElement | undefined;
+          let targetPageId: string | undefined;
+
+          if (uiState.selected && uiState.selected.pageId && uiState.selected.elementId) {
+            targetPageId = uiState.selected.pageId;
+            const p = activeJob.pages.find((pg) => pg.id === targetPageId);
+            targetEl = p?.elements.find((el) => el.id === uiState.selected?.elementId);
+          } else if (uiState.selectedIds.length === 1 && uiState.selectedPageId) {
+            targetPageId = uiState.selectedPageId;
+            const p = activeJob.pages.find((pg) => pg.id === targetPageId);
+            targetEl = p?.elements.find((el) => el.id === uiState.selectedIds[0]);
+          }
+
+          if (targetEl && targetEl.type === 'image' && targetEl.assetId && targetPageId) {
+            const asset = sessionState.assets.find((a) => a.id === targetEl?.assetId);
+            if (asset) {
+              e.preventDefault();
+              const pageObj = activeJob.pages.find((p) => p.id === targetPageId);
+              const activeBlock = activeJob.blocks?.find((b) => b.id === pageObj?.blockId);
+              const activeRow = activeBlock?.kind === 'sheet'
+                ? ((targetEl.rowId ? activeBlock.rows?.find((r) => r.id === targetEl.rowId) : undefined) ||
+                   activeBlock.rows?.find((r) => r.assetId === targetEl.assetId))
+                : undefined;
+
+              const isExplicitSized = activeRow?.size?.id ? activeRow.size.id !== 'default' : false;
+              const isRatioDifferent =
+                targetEl.wMm > 0 && targetEl.hMm > 0 && asset.pxW > 0 && asset.pxH > 0
+                  ? Math.abs(targetEl.wMm / targetEl.hMm - asset.pxW / asset.pxH) > 0.01
+                  : false;
+              const isSized = isExplicitSized || isRatioDifferent;
+              const sizeName = activeRow?.size?.id
+                ? (activeRow.size.id === 'wallet' ? 'Wallet' : activeRow.size.id)
+                : isRatioDifferent
+                ? (Math.abs(targetEl.wMm / targetEl.hMm - 1) < 0.05 ? '1x1' : undefined)
+                : undefined;
+
+              uiState.openCropModal({
+                jobId: activeJob.id,
+                target: targetEl.rowId ? { rowIds: [targetEl.rowId] } : { assetIds: [targetEl.assetId!] },
+                asset,
+                element: targetEl,
+                initialCropRect: targetEl.cropRect || activeRow?.cropRect,
+                isSizedVariant: isSized,
+                sizeName,
+              });
+            }
+          }
+        }
       }
     };
 
@@ -208,8 +280,19 @@ export function AppShell() {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  const { outputMode, checkNotice, exportProgress, setCheckNotice, assetSrcOverrides, message } = useUiStore();
-  const { activeJobId } = useSessionStore();
+  const {
+    outputMode,
+    outputJob,
+    outputPageIndexes: storeOutputPageIndexes,
+    checkNotice,
+    exportProgress,
+    setCheckNotice,
+    assetSrcOverrides,
+    message,
+    cropModal,
+    closeCropModal,
+  } = useUiStore();
+  const { activeJobId, applyVariantCrop } = useSessionStore();
   const activeJob = jobs.find((j) => j.id === activeJobId) || jobs[0];
 
   const assetsById = React.useMemo(() => {
@@ -225,6 +308,12 @@ export function AppShell() {
   }, [activeJob]);
 
   const isStartState = !activeJob?.pages.some((p) => p.elements && p.elements.length > 0);
+
+  const effectiveJobToPrint = outputJob || activeJob;
+  const effectivePageIndexesToPrint =
+    storeOutputPageIndexes && storeOutputPageIndexes.length > 0
+      ? storeOutputPageIndexes
+      : outputPageIndexes;
 
   return (
     <>
@@ -256,7 +345,7 @@ export function AppShell() {
       </div>
 
       {/* Print Root rendered for print media & PDF canvas generation */}
-      {outputMode !== null && activeJob && (
+      {outputMode !== null && effectiveJobToPrint && (
         <div
           id="print-root"
           className={outputMode === 'export' ? 'exporting-pdf' : undefined}
@@ -273,8 +362,8 @@ export function AppShell() {
           }
         >
           <PrintView
-            job={activeJob}
-            pageIndexes={outputPageIndexes}
+            job={effectiveJobToPrint}
+            pageIndexes={effectivePageIndexesToPrint}
             assetsById={assetsById}
             assetSrcOverrides={assetSrcOverrides || undefined}
           />
@@ -318,6 +407,24 @@ export function AppShell() {
       <ChangeLayoutModal />
       <SettingsModal />
       <ConfirmModal />
+      <PrintChooserModal />
+      {cropModal && (
+        <CropModal
+          asset={cropModal.asset}
+          initialCrop={cropModal.initialCropRect}
+          variantSize={
+            cropModal.element
+              ? { id: cropModal.sizeName || '', wMm: cropModal.element.wMm, hMm: cropModal.element.hMm }
+              : undefined
+          }
+          isDefault={!cropModal.isSizedVariant}
+          onConfirm={(newCrop) => {
+            applyVariantCrop(cropModal.jobId, cropModal.target, newCrop);
+            closeCropModal();
+          }}
+          onCancel={closeCropModal}
+        />
+      )}
     </>
   );
 }

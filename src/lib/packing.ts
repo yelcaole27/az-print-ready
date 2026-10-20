@@ -23,6 +23,7 @@ export interface PackCopiesArgs {
   assetId: string;
   rowId?: string;
   fit: 'cover' | 'contain';
+  cropRect?: { x: number; y: number; w: number; h: number };
 }
 
 export interface PackCopiesResult {
@@ -121,6 +122,7 @@ export function packCopies({
   assetId,
   rowId,
   fit,
+  cropRect,
 }: PackCopiesArgs): PackCopiesResult {
   const validStartPage = pages[startPageIndex] || pages[0];
   const { wMm: baseW, hMm: baseH } = getPageDimensionsMm(validStartPage);
@@ -191,6 +193,7 @@ export function packCopies({
         rowId,
         fit,
         cropGuides: false,
+        cropRect,
       };
 
       placements.push({ pageIndex, element });
@@ -239,6 +242,7 @@ export function packCopies({
             rowId,
             fit,
             cropGuides: false,
+            cropRect,
           };
 
           placements.push({ pageIndex: currentPageIdx, element });

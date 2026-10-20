@@ -10,6 +10,7 @@ export interface DocumentLayoutArgs {
   fit: DocFitMode;
   autoRotate: boolean;
   align: DocAlign;
+  cropRect?: { x: number; y: number; w: number; h: number };
 }
 
 export function layoutDocumentImage({
@@ -20,6 +21,7 @@ export function layoutDocumentImage({
   fit,
   autoRotate,
   align,
+  cropRect,
 }: DocumentLayoutArgs): PageElement[][] {
   const P = {
     x: marginMm,
@@ -28,7 +30,10 @@ export function layoutDocumentImage({
     h: Math.max(0, pageHMm - 2 * marginMm),
   };
 
-  if (P.w <= 0 || P.h <= 0 || asset.pxW <= 0 || asset.pxH <= 0) {
+  const effW = cropRect ? asset.pxW * (cropRect.w || 1) : asset.pxW;
+  const effH = cropRect ? asset.pxH * (cropRect.h || 1) : asset.pxH;
+
+  if (P.w <= 0 || P.h <= 0 || effW <= 0 || effH <= 0) {
     return [];
   }
 
@@ -41,9 +46,9 @@ export function layoutDocumentImage({
       scale: number;
     } = {
       rot: 0,
-      cw: asset.pxW,
-      ch: asset.pxH,
-      scale: Math.min(P.w / asset.pxW, P.h / asset.pxH),
+      cw: effW,
+      ch: effH,
+      scale: Math.min(P.w / effW, P.h / effH),
     };
 
     let chosen = candidate0;
@@ -51,9 +56,9 @@ export function layoutDocumentImage({
     if (autoRotate) {
       const candidate90 = {
         rot: 90 as const,
-        cw: asset.pxH,
-        ch: asset.pxW,
-        scale: Math.min(P.w / asset.pxH, P.h / asset.pxW),
+        cw: effH,
+        ch: effW,
+        scale: Math.min(P.w / effH, P.h / effW),
       };
 
       if (candidate90.scale > candidate0.scale) {
@@ -77,6 +82,7 @@ export function layoutDocumentImage({
       rotation: chosen.rot,
       fit: 'cover',
       cropGuides: false,
+      cropRect,
     };
 
     return [[element]];

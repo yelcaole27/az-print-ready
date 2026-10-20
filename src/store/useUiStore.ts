@@ -1,4 +1,15 @@
 import { create } from 'zustand';
+import type { Job, ImageAsset, PageElement, PictureTarget, CheckNoticeState } from '@/types';
+
+export interface CropModalState {
+  jobId: string;
+  target: PictureTarget;
+  asset: ImageAsset;
+  element?: PageElement;
+  initialCropRect?: { x: number; y: number; w: number; h: number };
+  isSizedVariant: boolean;
+  sizeName?: string;
+}
 
 export type ZoomMode = 'fit-page' | 'fit-width' | 'custom';
 export type AppTheme = 'light' | 'dark' | 'system';
@@ -75,8 +86,10 @@ interface UiState {
 
   // Phase 7 Print and Export State
   outputMode: null | 'print' | 'export';
+  outputJob: Job | null;
+  outputPageIndexes: number[];
   exportProgress: { done: number; total: number } | null;
-  checkNotice: { action: 'print' | 'export'; lines: string[] } | null;
+  checkNotice: CheckNoticeState | null;
   assetSrcOverrides: Record<string, string> | null;
 
   // Multi-image import flow
@@ -91,6 +104,12 @@ interface UiState {
   // Confirm Modal
   confirmModal: ConfirmModalState | null;
 
+  // Back-to-back print chooser
+  printChooser: { action: 'print' | 'export' | 'testSheet' } | null;
+
+  // Crop modal
+  cropModal: CropModalState | null;
+
   // Inline Message Banner
   message: UiMessage | null;
 
@@ -98,6 +117,10 @@ interface UiState {
   setSettingsOpen: (open: boolean) => void;
   openConfirmModal: (conf: ConfirmModalState) => void;
   closeConfirmModal: () => void;
+  openPrintChooser: (action: 'print' | 'export' | 'testSheet') => void;
+  closePrintChooser: () => void;
+  openCropModal: (modal: CropModalState) => void;
+  closeCropModal: () => void;
 
   setMultiImport: (
     val:
@@ -107,8 +130,9 @@ interface UiState {
   ) => void;
   setOverflow: (elementId: string, isOverflow: boolean) => void;
   setOutputMode: (mode: null | 'print' | 'export') => void;
+  setOutputTarget: (job: any | null, pageIndexes: number[]) => void;
   setExportProgress: (progress: { done: number; total: number } | null) => void;
-  setCheckNotice: (notice: { action: 'print' | 'export'; lines: string[] } | null) => void;
+  setCheckNotice: (notice: CheckNoticeState | null) => void;
   setAssetSrcOverrides: (overrides: Record<string, string> | null) => void;
 
   setZoom: (zoom: number) => void;
@@ -217,6 +241,8 @@ export const useUiStore = create<UiState>((set) => ({
 
   overflowIds: new Set<string>(),
   outputMode: null,
+  outputJob: null,
+  outputPageIndexes: [],
   exportProgress: null,
   checkNotice: null,
   assetSrcOverrides: null,
@@ -224,6 +250,8 @@ export const useUiStore = create<UiState>((set) => ({
   editingBlockLayoutId: null,
   isSettingsOpen: false,
   confirmModal: null,
+  printChooser: null,
+  cropModal: null,
 
   message: null,
 
@@ -241,6 +269,22 @@ export const useUiStore = create<UiState>((set) => ({
 
   closeConfirmModal: () => {
     set({ confirmModal: null });
+  },
+
+  openPrintChooser: (action: 'print' | 'export' | 'testSheet') => {
+    set({ printChooser: { action } });
+  },
+
+  closePrintChooser: () => {
+    set({ printChooser: null });
+  },
+
+  openCropModal: (target) => {
+    set({ cropModal: target });
+  },
+
+  closeCropModal: () => {
+    set({ cropModal: null });
   },
 
   setZoom: (zoom: number) => {
@@ -437,7 +481,15 @@ export const useUiStore = create<UiState>((set) => ({
   },
 
   setOutputMode: (mode: null | 'print' | 'export') => {
-    set({ outputMode: mode });
+    if (mode === null) {
+      set({ outputMode: null, outputJob: null, outputPageIndexes: [] });
+    } else {
+      set({ outputMode: mode });
+    }
+  },
+
+  setOutputTarget: (job: any | null, pageIndexes: number[]) => {
+    set({ outputJob: job, outputPageIndexes: pageIndexes });
   },
 
   setExportProgress: (progress: { done: number; total: number } | null) => {

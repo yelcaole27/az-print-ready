@@ -71,7 +71,7 @@ export async function exportPdf({
   assetsById,
   signal,
 }: ExportPdfOptions): Promise<void> {
-  const { setExportProgress, setOutputMode, setAssetSrcOverrides, setMessage } =
+  const { setExportProgress, setOutputMode, setOutputTarget, setAssetSrcOverrides, setMessage } =
     useUiStore.getState();
 
   // Dynamically import html-to-image and jspdf client-side
@@ -85,8 +85,12 @@ export async function exportPdf({
   const total = pageIndexes.length;
   setExportProgress({ done: 0, total });
 
-  // Mount print root in export mode
-  setOutputMode('export');
+  // Set output target and export mode atomically
+  useUiStore.setState({
+    outputJob: job,
+    outputPageIndexes: pageIndexes,
+    outputMode: 'export',
+  });
 
   let printRoot = document.getElementById('print-root');
 
@@ -279,8 +283,12 @@ export async function exportPdf({
       printRoot.style.pointerEvents = '';
       printRoot.style.display = '';
     }
-    setOutputMode(null);
-    setExportProgress(null);
-    setAssetSrcOverrides(null);
+    useUiStore.setState({
+      outputMode: null,
+      outputJob: null,
+      outputPageIndexes: [],
+      exportProgress: null,
+      assetSrcOverrides: null,
+    });
   }
 }

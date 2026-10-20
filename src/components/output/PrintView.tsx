@@ -55,7 +55,8 @@ export function PrintView({ job, pageIndexes, assetsById, assetSrcOverrides }: P
 
               const asset = el.assetId ? assetsById.get(el.assetId) : null;
               const srcOverride =
-                el.assetId && assetSrcOverrides ? assetSrcOverrides[el.assetId] : undefined;
+                (el.id && assetSrcOverrides ? assetSrcOverrides[el.id] : undefined) ||
+                (el.assetId && assetSrcOverrides ? assetSrcOverrides[el.assetId] : undefined);
 
               return (
                 <div

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Lock, Unlock, ChevronDown, Move, Plus, Trash2 } from 'lucide-react';
+import { Lock, Unlock, ChevronDown, Move, Plus, Trash2, Link2 } from 'lucide-react';
 import { useSessionStore } from '@/store/useSessionStore';
 import { useUiStore } from '@/store/useUiStore';
 import { mmToUnit, unitToMm } from '@/lib/units';
@@ -236,12 +236,34 @@ function ElementInspectorForm({
               Text
             </div>
           ) : asset ? (
-            <div className="w-[52px] h-[72px] rounded-[10px] overflow-hidden border border-line bg-surface shrink-0">
-              <img
-                src={asset.thumbUrl || asset.objectUrl}
-                alt={asset.name}
-                className="w-full h-full object-cover select-none pointer-events-none"
-              />
+            <div className="w-[52px] h-[72px] rounded-[10px] overflow-hidden border border-line bg-surface shrink-0 relative">
+              {element.cropRect || activeRow?.cropRect ? (
+                (() => {
+                  const crop = element.cropRect || activeRow?.cropRect;
+                  if (!crop) return null;
+                  return (
+                    <img
+                      src={asset.thumbUrl || asset.previewUrl || asset.objectUrl}
+                      alt={asset.name}
+                      style={{
+                        position: 'absolute',
+                        width: `${(1 / crop.w) * 100}%`,
+                        height: `${(1 / crop.h) * 100}%`,
+                        left: `${-(crop.x / crop.w) * 100}%`,
+                        top: `${-(crop.y / crop.h) * 100}%`,
+                        objectFit: 'fill',
+                      }}
+                      className="max-w-none max-h-none select-none pointer-events-none"
+                    />
+                  );
+                })()
+              ) : (
+                <img
+                  src={asset.thumbUrl || asset.objectUrl}
+                  alt={asset.name}
+                  className="w-full h-full object-cover select-none pointer-events-none"
+                />
+              )}
             </div>
           ) : (
             <div className="w-[52px] h-[72px] rounded-[10px] border border-line bg-surface flex items-center justify-center text-xs text-muted shrink-0">
@@ -275,6 +297,22 @@ function ElementInspectorForm({
                 </div>
               </div>
             )}
+            {!isText && (element.cropRect || activeRow?.cropRect) && (
+              <div className="flex items-center gap-2 mt-1">
+                <span className="px-1.5 py-0.5 rounded-[4px] bg-blue/10 text-blue text-[10px] font-semibold border border-blue/20">
+                  Cropped
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    useSessionStore.getState().applyVariantCrop(job.id, element.rowId ? { rowIds: [element.rowId] } : { assetIds: [element.assetId!] }, null);
+                  }}
+                  className="text-[11px] text-muted hover:text-ink underline cursor-pointer"
+                >
+                  Reset crop
+                </button>
+              </div>
+            )}
             {isSliced && (
               <span className="text-[11px] font-medium text-blue mt-0.5">
                 Slice {element.sliceIndex} of {element.sliceCount}
@@ -289,7 +327,7 @@ function ElementInspectorForm({
           </p>
         )}
 
-        {/* 3 buttons: Rotate, Copy, Delete in red */}
+        {/* 4 buttons: Rotate, Crop, Copy, Delete in red */}
         <div className="flex items-center gap-2">
           {!isText && (
             <button
@@ -299,6 +337,40 @@ function ElementInspectorForm({
               className="h-[38px] flex-1 rounded-[12px] border-[1.5px] border-line bg-surface text-ink text-xs font-semibold hover:border-line2 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
             >
               Rotate
+            </button>
+          )}
+          {!isText && (
+            <button
+              type="button"
+              disabled={isSliced}
+              onClick={() => {
+                if (asset) {
+                  const isExplicitSized = activeRow?.size?.id ? activeRow.size.id !== 'default' : false;
+                  const isRatioDifferent =
+                    element.wMm > 0 && element.hMm > 0 && asset.pxW > 0 && asset.pxH > 0
+                      ? Math.abs(element.wMm / element.hMm - asset.pxW / asset.pxH) > 0.01
+                      : false;
+                  const isSized = isExplicitSized || isRatioDifferent;
+                  const sizeName = activeRow?.size?.id
+                    ? (activeRow.size.id === 'wallet' ? 'Wallet' : activeRow.size.id)
+                    : isRatioDifferent
+                    ? (Math.abs(element.wMm / element.hMm - 1) < 0.05 ? '1x1' : undefined)
+                    : undefined;
+
+                  useUiStore.getState().openCropModal({
+                    jobId: job.id,
+                    target: element.rowId ? { rowIds: [element.rowId] } : { assetIds: [element.assetId!] },
+                    asset,
+                    element,
+                    initialCropRect: element.cropRect || activeRow?.cropRect,
+                    isSizedVariant: isSized,
+                    sizeName,
+                  });
+                }
+              }}
+              className="h-[38px] flex-1 rounded-[12px] border-[1.5px] border-line bg-surface text-ink text-xs font-semibold hover:border-line2 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Crop
             </button>
           )}
           <button
@@ -646,6 +718,9 @@ export function RightPanel() {
     removeElement,
     removeElements,
     removePage,
+    addBackPage,
+    removeBackPage,
+    setPageFlipMode,
   } = useSessionStore();
 
   const {
@@ -744,6 +819,21 @@ export function RightPanel() {
         const firstSize = sizes[0];
         const sharedSize = sizes.length > 0 && sizes.every((s) => s === firstSize) ? firstSize : 'Multiple sizes';
 
+        const firstEl = selectedEls[0];
+        const isSameVariant =
+          selectedEls.length > 0 &&
+          selectedEls.every(
+            (el) =>
+              el.type === 'image' &&
+              el.assetId === firstEl.assetId &&
+              (el.rowId ? el.rowId === firstEl.rowId : true)
+          );
+        const firstAsset = firstEl?.assetId ? assets.find((a) => a.id === firstEl.assetId) : null;
+        const activeRow = pageBlock?.kind === 'sheet' && firstEl
+          ? ((firstEl.rowId ? pageBlock.rows?.find((r) => r.id === firstEl.rowId) : undefined) ||
+             pageBlock.rows?.find((r) => r.assetId === firstEl.assetId))
+          : undefined;
+
         return (
           <div className="bg-surface2 rounded-[18px] p-[14px] border border-line flex items-center justify-between shrink-0">
             <div className="flex flex-col min-w-0">
@@ -754,13 +844,48 @@ export function RightPanel() {
                 {sharedSize}
               </span>
             </div>
-            <button
-              type="button"
-              onClick={handleDeleteMulti}
-              className="h-[34px] px-3 rounded-[10px] border border-red/30 bg-red/10 text-red text-xs font-semibold hover:bg-red hover:text-white transition-colors cursor-pointer"
-            >
-              Delete
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={!isSameVariant}
+                title={!isSameVariant ? 'Crop disabled for multiple variants' : 'Crop variant'}
+                onClick={() => {
+                  if (isSameVariant && firstAsset && firstEl) {
+                    const isExplicitSized = activeRow?.size?.id ? activeRow.size.id !== 'default' : false;
+                    const isRatioDifferent =
+                      firstEl.wMm > 0 && firstEl.hMm > 0 && firstAsset.pxW > 0 && firstAsset.pxH > 0
+                        ? Math.abs(firstEl.wMm / firstEl.hMm - firstAsset.pxW / firstAsset.pxH) > 0.01
+                        : false;
+                    const isSized = isExplicitSized || isRatioDifferent;
+                    const sizeName = activeRow?.size?.id
+                      ? (activeRow.size.id === 'wallet' ? 'Wallet' : activeRow.size.id)
+                      : isRatioDifferent
+                      ? (Math.abs(firstEl.wMm / firstEl.hMm - 1) < 0.05 ? '1x1' : undefined)
+                      : undefined;
+
+                    useUiStore.getState().openCropModal({
+                      jobId: activeJob.id,
+                      target: firstEl.rowId ? { rowIds: [firstEl.rowId] } : { assetIds: [firstEl.assetId!] },
+                      asset: firstAsset,
+                      element: firstEl,
+                      initialCropRect: firstEl.cropRect || activeRow?.cropRect,
+                      isSizedVariant: isSized,
+                      sizeName,
+                    });
+                  }
+                }}
+                className="h-[34px] px-3 rounded-[10px] border border-line bg-surface text-ink text-xs font-semibold hover:border-line2 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Crop
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteMulti}
+                className="h-[34px] px-3 rounded-[10px] border border-red/30 bg-red/10 text-red text-xs font-semibold hover:bg-red hover:text-white transition-colors cursor-pointer"
+              >
+                Delete
+              </button>
+            </div>
           </div>
         );
       })() : selected && selectedPage && selectedElement ? (
@@ -804,6 +929,12 @@ export function RightPanel() {
               ? page.id === activePageId
               : idx === 0;
             const summary = getPageSummary(page, activeJob);
+            const isBack = Boolean(page.isBack);
+            const frontPageIndex = isBack
+              ? activeJob.pages.findIndex((p) => p.id === page.frontPageId)
+              : -1;
+            const frontPageNum = frontPageIndex !== -1 ? frontPageIndex + 1 : idx;
+            const hasBack = Boolean(page.backPageId);
 
             return (
               <div
@@ -813,67 +944,159 @@ export function RightPanel() {
                   const el = document.querySelector(`[data-page-id="${page.id}"]`);
                   el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 }}
-                className={`rounded-[16px] p-3 border-[1.5px] transition-all cursor-pointer flex items-center gap-3 ${
+                className={`rounded-[16px] p-3 border-[1.5px] transition-all cursor-pointer flex flex-col gap-2.5 ${
                   isCurrentPage
                     ? 'border-blue bg-blue-tint'
                     : 'border-line bg-surface2 hover:border-line2'
                 }`}
               >
-                {/* 60x78 mini-page thumbnail */}
-                <div className="w-[60px] h-[78px] rounded-[6px] border border-line bg-[#FBFAF6] relative overflow-hidden shrink-0 shadow-xs">
-                  {page.elements.map((el) => {
-                    const elAsset = assets.find((a) => a.id === el.assetId);
-                    const leftPct = (el.xMm / sheetWMm) * 100;
-                    const topPct = (el.yMm / sheetHMm) * 100;
-                    const widthPct = (el.wMm / sheetWMm) * 100;
-                    const heightPct = (el.hMm / sheetHMm) * 100;
+                <div className="flex items-center gap-3 w-full">
+                  {/* 60x78 mini-page thumbnail */}
+                  <div className="w-[60px] h-[78px] rounded-[6px] border border-line bg-[#FBFAF6] relative overflow-hidden shrink-0 shadow-xs">
+                    {page.elements.map((el) => {
+                      const elAsset = assets.find((a) => a.id === el.assetId);
+                      const leftPct = (el.xMm / sheetWMm) * 100;
+                      const topPct = (el.yMm / sheetHMm) * 100;
+                      const widthPct = (el.wMm / sheetWMm) * 100;
+                      const heightPct = (el.hMm / sheetHMm) * 100;
 
-                    return (
-                      <div
-                        key={el.id}
-                        className="absolute overflow-hidden bg-line2/60 border border-line rounded-[1px]"
-                        style={{
-                          left: `${Math.max(0, Math.min(100, leftPct))}%`,
-                          top: `${Math.max(0, Math.min(100, topPct))}%`,
-                          width: `${Math.max(2, Math.min(100, widthPct))}%`,
-                          height: `${Math.max(2, Math.min(100, heightPct))}%`,
+                      return (
+                        <div
+                          key={el.id}
+                          className="absolute overflow-hidden bg-line2/60 border border-line rounded-[1px]"
+                          style={{
+                            left: `${Math.max(0, Math.min(100, leftPct))}%`,
+                            top: `${Math.max(0, Math.min(100, topPct))}%`,
+                            width: `${Math.max(2, Math.min(100, widthPct))}%`,
+                            height: `${Math.max(2, Math.min(100, heightPct))}%`,
+                          }}
+                        >
+                          {elAsset && (
+                            el.cropRect ? (
+                              <img
+                                src={elAsset.thumbUrl || elAsset.previewUrl || elAsset.objectUrl}
+                                alt=""
+                                style={{
+                                  position: 'absolute',
+                                  width: `${(1 / el.cropRect.w) * 100}%`,
+                                  height: `${(1 / el.cropRect.h) * 100}%`,
+                                  left: `${-(el.cropRect.x / el.cropRect.w) * 100}%`,
+                                  top: `${-(el.cropRect.y / el.cropRect.h) * 100}%`,
+                                  objectFit: 'fill',
+                                }}
+                                className="max-w-none max-h-none pointer-events-none"
+                              />
+                            ) : (
+                              <img
+                                src={elAsset.thumbUrl || elAsset.objectUrl}
+                                alt=""
+                                className="w-full h-full object-cover pointer-events-none"
+                              />
+                            )
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Two lines */}
+                  <div className="flex flex-col min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 truncate">
+                      {isBack && <Link2 className="w-3.5 h-3.5 text-blue shrink-0" />}
+                      <span className="text-sm font-bold text-ink truncate">
+                        {isBack ? `Back of ${frontPageNum}` : `Page ${idx + 1}`}
+                      </span>
+                      {!isBack && hasBack && (
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue/15 text-blue border border-blue/30 shrink-0">
+                          2-sided
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-xs text-muted truncate mt-0.5">
+                      {summary}
+                    </span>
+                  </div>
+
+                  {/* Actions on right */}
+                  <div className="flex items-center gap-1 shrink-0 ml-auto" onClick={(e) => e.stopPropagation()}>
+                    {!isBack && !hasBack && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const newBackId = addBackPage(activeJob.id, page.id);
+                          if (newBackId) {
+                            setActivePage(newBackId);
+                          }
                         }}
+                        className="px-2.5 py-1 rounded-[8px] bg-surface border border-line hover:border-blue hover:text-blue text-xs font-semibold text-ink transition-colors cursor-pointer"
+                        title="Add back page"
                       >
-                        {elAsset && (
-                          <img
-                            src={elAsset.thumbUrl || elAsset.objectUrl}
-                            alt=""
-                            className="w-full h-full object-cover pointer-events-none"
-                          />
-                        )}
-                      </div>
-                    );
-                  })}
+                        Back
+                      </button>
+                    )}
+
+                    {isBack && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleDeleteEmptyPage(page.id);
+                        }}
+                        className="w-8 h-8 rounded-[10px] flex items-center justify-center text-muted hover:text-red hover:bg-red/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red transition-colors cursor-pointer"
+                        aria-label="Delete page"
+                        title="Delete page"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+
+                    {!isBack && summary === 'Empty' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleDeleteEmptyPage(page.id);
+                        }}
+                        className="w-8 h-8 rounded-[10px] flex items-center justify-center text-muted hover:text-red hover:bg-red/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red transition-colors shrink-0 cursor-pointer"
+                        aria-label="Delete page"
+                        title="Delete page"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
                 </div>
 
-                {/* Two lines */}
-                <div className="flex flex-col min-w-0 flex-1">
-                  <span className="text-sm font-bold text-ink truncate">
-                    Page {idx + 1}
-                  </span>
-                  <span className="text-xs text-muted truncate mt-0.5">
-                    {summary}
-                  </span>
-                </div>
-
-                {summary === 'Empty' && (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeleteEmptyPage(page.id);
-                    }}
-                    className="w-8 h-8 rounded-[10px] flex items-center justify-center text-muted hover:text-red hover:bg-red/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red transition-colors shrink-0 ml-auto"
-                    aria-label="Delete page"
-                    title="Delete page"
+                {/* If back page: Flip paper setting */}
+                {isBack && (
+                  <div
+                    className="pt-2 border-t border-line/60 flex items-center justify-between text-xs"
+                    onClick={(e) => e.stopPropagation()}
                   >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                    <span className="text-[11.5px] text-muted font-medium">Flip paper:</span>
+                    <div className="flex rounded-[8px] border border-line bg-surface p-0.5 text-[11px]">
+                      <button
+                        type="button"
+                        onClick={() => setPageFlipMode(activeJob.id, page.id, 'sideways')}
+                        className={`px-2 py-0.5 rounded-[6px] font-semibold transition-colors cursor-pointer ${
+                          (page.flipMode || 'sideways') === 'sideways'
+                            ? 'bg-blue text-white shadow-xs'
+                            : 'text-muted hover:text-ink'
+                        }`}
+                      >
+                        Sideways
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPageFlipMode(activeJob.id, page.id, 'upward')}
+                        className={`px-2 py-0.5 rounded-[6px] font-semibold transition-colors cursor-pointer ${
+                          page.flipMode === 'upward'
+                            ? 'bg-blue text-white shadow-xs'
+                            : 'text-muted hover:text-ink'
+                        }`}
+                      >
+                        Upward
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
             );

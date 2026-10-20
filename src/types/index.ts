@@ -40,6 +40,7 @@ export interface PageElement {
   cropGuides?: unknown;
   html?: string;
   crop?: { x: number; y: number; w: number; h: number };
+  cropRect?: { x: number; y: number; w: number; h: number };
   sliceIndex?: number;
   sliceCount?: number;
 
@@ -50,6 +51,8 @@ export interface PageElement {
   borderMm?: number;
   borderColor?: string;
   autoGrow?: boolean;
+  // Back-to-back slot mapping
+  frontElementId?: string;
 }
 
 export type BlockKind = 'fit' | 'fill' | 'width' | 'collage' | 'sheet';
@@ -69,6 +72,7 @@ export interface SheetRow {
   qty: number;
   fillPage?: boolean;
   crop?: boolean;
+  cropRect?: { x: number; y: number; w: number; h: number };
 }
 
 export interface Block {
@@ -88,6 +92,11 @@ export interface Page {
   blockId?: string;
   generatedSig?: string;
   stayPut?: boolean;
+  isBack?: boolean;
+  frontPageId?: string;
+  backPageId?: string;
+  flipMode?: 'sideways' | 'upward';
+  seeFront?: boolean;
 }
 
 export interface Settings {
@@ -112,3 +121,16 @@ export interface Session {
   activeJobId: string;
   assets: ImageAsset[];
 }
+
+export interface OutputOptions {
+  sideFilter?: 'all' | 'fronts' | 'backs';
+  reverseBacks?: boolean;
+  customJob?: Job;
+}
+
+export interface CheckNoticeState {
+  action: 'print' | 'export';
+  lines: string[];
+  options?: OutputOptions;
+}
+

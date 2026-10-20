@@ -80,36 +80,56 @@ export function ElementContent({
   }
 
   const imgSrc = srcOverride || asset.previewUrl || asset.objectUrl;
-
-  if (element.crop) {
-    return (
-      <div className="relative w-full h-full overflow-hidden pointer-events-none">
-        <img
-          src={imgSrc}
-          alt=""
-          draggable={false}
-          loading={loading}
-          decoding={decoding}
-          style={{
-            position: 'absolute',
-            width: `${(1 / element.crop.w) * 100}%`,
-            height: `${(1 / element.crop.h) * 100}%`,
-            left: `${-(element.crop.x / element.crop.w) * 100}%`,
-            top: `${-(element.crop.y / element.crop.h) * 100}%`,
-            objectFit: 'fill',
-            display: 'block',
-          }}
-          className="select-none pointer-events-none max-w-none max-h-none"
-        />
-      </div>
-    );
-  }
-
+  const crop = element.cropRect || element.crop;
   const rotation = element.rotation || 0;
   const objectFit: React.CSSProperties['objectFit'] =
-    element.fit === 'stretch' ? 'fill' : 'cover';
+    element.fit === 'stretch' ? 'fill' : element.fit === 'contain' ? 'contain' : 'cover';
 
-  if (rotation === 90) {
+  const renderImageContent = () => {
+    if (crop && !srcOverride) {
+      return (
+        <div className="relative w-full h-full overflow-hidden pointer-events-none">
+          <img
+            src={imgSrc}
+            alt=""
+            draggable={false}
+            loading={loading}
+            decoding={decoding}
+            style={{
+              position: 'absolute',
+              width: `${(1 / crop.w) * 100}%`,
+              height: `${(1 / crop.h) * 100}%`,
+              left: `${-(crop.x / crop.w) * 100}%`,
+              top: `${-(crop.y / crop.h) * 100}%`,
+              objectFit: element.fit === 'contain' ? 'contain' : 'fill',
+              display: 'block',
+            }}
+            className="select-none pointer-events-none max-w-none max-h-none"
+          />
+        </div>
+      );
+    }
+
+    return (
+      <img
+        src={imgSrc}
+        alt=""
+        draggable={false}
+        loading={loading}
+        decoding={decoding}
+        style={{
+          width: '100%',
+          height: '100%',
+          objectFit,
+          objectPosition: 'center',
+          display: 'block',
+        }}
+        className="select-none pointer-events-none"
+      />
+    );
+  };
+
+  if (rotation === 90 || rotation === 270) {
     const widthPx = element.wMm * MM_TO_PX * zoom;
     const heightPx = element.hMm * MM_TO_PX * zoom;
     const innerW = heightPx;
@@ -124,45 +144,31 @@ export function ElementContent({
           height: `${innerH}px`,
           left: `${innerLeft}px`,
           top: `${innerTop}px`,
-          transform: 'rotate(90deg)',
+          transform: `rotate(${rotation}deg)`,
           transformOrigin: 'center',
         }}
         className="absolute pointer-events-none"
       >
-        <img
-          src={imgSrc}
-          alt=""
-          draggable={false}
-          loading={loading}
-          decoding={decoding}
-          style={{
-            width: '100%',
-            height: '100%',
-            objectFit,
-            objectPosition: 'center',
-            display: 'block',
-          }}
-          className="select-none pointer-events-none"
-        />
+        {renderImageContent()}
       </div>
     );
   }
 
-  return (
-    <img
-      src={imgSrc}
-      alt=""
-      draggable={false}
-      loading={loading}
-      decoding={decoding}
-      style={{
-        width: '100%',
-        height: '100%',
-        objectFit,
-        objectPosition: 'center',
-        display: 'block',
-      }}
-      className="select-none pointer-events-none"
-    />
-  );
+  if (rotation === 180) {
+    return (
+      <div
+        style={{
+          width: '100%',
+          height: '100%',
+          transform: 'rotate(180deg)',
+          transformOrigin: 'center',
+        }}
+        className="w-full h-full pointer-events-none"
+      >
+        {renderImageContent()}
+      </div>
+    );
+  }
+
+  return renderImageContent();
 }

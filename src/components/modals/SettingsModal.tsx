@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
-import { X, Type } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, Type, Minus, Plus, RotateCcw, Printer } from 'lucide-react';
 import { useSessionStore } from '@/store/useSessionStore';
 import { useUiStore } from '@/store/useUiStore';
 import { ModalShell } from './ModalShell';
@@ -9,10 +9,12 @@ import { Unit } from '@/types';
 import { mmToUnit, unitToMm } from '@/lib/units';
 import { computeCutGuides } from '@/lib/cutGuides';
 import { addTextBox, newTextPage } from '@/lib/textActions';
+import { getBackNudge, setBackNudge, resetBackNudge, type BackNudge } from '@/lib/backNudge';
 
 export function SettingsModal() {
   const isSettingsOpen = useUiStore((s) => s.isSettingsOpen);
   const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
+  const openPrintChooser = useUiStore((s) => s.openPrintChooser);
   const activePageId = useUiStore((s) => s.activePageId);
   const clearSelection = useUiStore((s) => s.clearSelection);
   const openConfirmModal = useUiStore((s) => s.openConfirmModal);
@@ -29,6 +31,29 @@ export function SettingsModal() {
   // Draft state for space inputs
   const [marginDraft, setMarginDraft] = useState<string | null>(null);
   const [gapDraft, setGapDraft] = useState<string | null>(null);
+
+  // Back alignment calibration nudge
+  const [nudge, setNudge] = useState<BackNudge>({ xMm: 0, yMm: 0 });
+
+  useEffect(() => {
+    if (isSettingsOpen) {
+      setNudge(getBackNudge());
+    }
+  }, [isSettingsOpen]);
+
+  const handleNudgeChange = (axis: 'x' | 'y', delta: number) => {
+    const currentVal = axis === 'x' ? nudge.xMm : nudge.yMm;
+    const nextVal = Math.round((currentVal + delta) * 10) / 10;
+    const updated = setBackNudge(
+      axis === 'x' ? { xMm: nextVal } : { yMm: nextVal }
+    );
+    setNudge(updated);
+  };
+
+  const handleResetNudge = () => {
+    const reset = resetBackNudge();
+    setNudge(reset);
+  };
 
   if (!isSettingsOpen || !activeJob) {
     return null;
@@ -241,6 +266,102 @@ export function SettingsModal() {
               <span>{cutWarning}</span>
             </div>
           )}
+        </section>
+
+        {/* Back alignment */}
+        <section className="flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-[11.5px] font-bold uppercase tracking-[0.14em] text-faint">
+              Back alignment
+            </h3>
+            {(nudge.xMm !== 0 || nudge.yMm !== 0) && (
+              <button
+                type="button"
+                onClick={handleResetNudge}
+                className="text-xs text-blue hover:underline font-semibold cursor-pointer"
+              >
+                Reset
+              </button>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            {/* Nudge sideways */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[13px] font-medium text-muted">
+                Nudge sideways (mm)
+              </label>
+              <div className="h-[44px] px-2 rounded-[14px] border-[1.5px] border-line bg-surface2 flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={() => handleNudgeChange('x', -0.1)}
+                  disabled={nudge.xMm <= -5.0}
+                  className="w-8 h-8 rounded-[10px] flex items-center justify-center text-muted hover:text-ink hover:bg-surface disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer disabled:cursor-not-allowed transition-colors"
+                  aria-label="Decrease sideways nudge"
+                >
+                  <Minus className="w-4 h-4" />
+                </button>
+                <span className="font-mono text-[14px] font-bold text-ink">
+                  {nudge.xMm > 0 ? `+${nudge.xMm.toFixed(1)}` : nudge.xMm.toFixed(1)}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleNudgeChange('x', 0.1)}
+                  disabled={nudge.xMm >= 5.0}
+                  className="w-8 h-8 rounded-[10px] flex items-center justify-center text-muted hover:text-ink hover:bg-surface disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer disabled:cursor-not-allowed transition-colors"
+                  aria-label="Increase sideways nudge"
+                >
+                  <Plus className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Nudge up/down */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[13px] font-medium text-muted">
+                Nudge up/down (mm)
+              </label>
+              <div className="h-[44px] px-2 rounded-[14px] border-[1.5px] border-line bg-surface2 flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={() => handleNudgeChange('y', -0.1)}
+                  disabled={nudge.yMm <= -5.0}
+                  className="w-8 h-8 rounded-[10px] flex items-center justify-center text-muted hover:text-ink hover:bg-surface disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer disabled:cursor-not-allowed transition-colors"
+                  aria-label="Decrease up/down nudge"
+                >
+                  <Minus className="w-4 h-4" />
+                </button>
+                <span className="font-mono text-[14px] font-bold text-ink">
+                  {nudge.yMm > 0 ? `+${nudge.yMm.toFixed(1)}` : nudge.yMm.toFixed(1)}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleNudgeChange('y', 0.1)}
+                  disabled={nudge.yMm >= 5.0}
+                  className="w-8 h-8 rounded-[10px] flex items-center justify-center text-muted hover:text-ink hover:bg-surface disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer disabled:cursor-not-allowed transition-colors"
+                  aria-label="Increase up/down nudge"
+                >
+                  <Plus className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <p className="text-[13px] text-muted leading-relaxed">
+            Print the test front, flip, print the test back, hold to the light. Move the nudge until the marks match.
+          </p>
+
+          <button
+            type="button"
+            onClick={() => {
+              setSettingsOpen(false);
+              openPrintChooser('testSheet');
+            }}
+            className="h-[44px] px-4 rounded-[14px] border-[1.5px] border-line bg-surface2 hover:border-blue hover:text-blue text-ink text-[14px] font-bold transition-colors cursor-pointer flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue"
+          >
+            <Printer className="w-4 h-4" />
+            <span>Print test sheet</span>
+          </button>
         </section>
 
         {/* 4) Text */}
