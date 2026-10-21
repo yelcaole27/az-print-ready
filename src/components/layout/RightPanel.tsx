@@ -9,6 +9,8 @@ import { PAPERS } from '@/lib/constants/papers';
 import { Button } from '@/components/ui/Button';
 import { getEffectiveDpi } from '@/lib/quality';
 import { copySelection } from '@/lib/clipboard';
+import { usePriceStore } from '@/store/usePriceStore';
+import { calculateJobPrice } from '@/lib/pricing';
 import type { PageElement, ImageAsset, Job, Unit, Page } from '@/types';
 
 const BRAND_COLORS = [
@@ -720,7 +722,12 @@ export function RightPanel() {
     addBackPage,
     removeBackPage,
     setPageFlipMode,
+    updateSettings,
+    setJobPaper,
   } = useSessionStore();
+
+  const { settings: priceSettings } = usePriceStore();
+  const [showPriceDetails, setShowPriceDetails] = useState(false);
 
   const {
     selected,
@@ -735,11 +742,13 @@ export function RightPanel() {
     setLayoutMode,
     setDocFit,
     setActiveAssetId,
+    setSettingsOpen,
   } = useUiStore();
 
   const [isHoveringNewPage, setIsHoveringNewPage] = useState(false);
 
   const activeJob = jobs.find((j) => j.id === activeJobId) || jobs[0];
+  const pricingResult = activeJob ? calculateJobPrice(activeJob, priceSettings) : null;
 
   const handleDeleteEmptyPage = (pageId: string) => {
     if (!activeJob) return;
@@ -1153,6 +1162,121 @@ export function RightPanel() {
           </button>
         </div>
       </div>
+
+      {/* PRICE Card (always visible at bottom, compact) */}
+      {priceSettings.showPriceTotal && activeJob && pricingResult && (
+        <div className="shrink-0 rounded-[16px] border border-line bg-surface2 p-3 flex flex-col gap-2.5">
+          {/* Header row: "Price" label, "Edit prices" shortcut & Color / B&W switch */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-faint">
+                Price
+              </span>
+              <button
+                type="button"
+                onClick={() => setSettingsOpen(true, 'prices')}
+                className="text-[11px] text-blue hover:underline font-semibold cursor-pointer"
+              >
+                Edit prices
+              </button>
+            </div>
+            <div className="h-[26px] p-0.5 rounded-[8px] bg-surface border border-line flex items-center text-[11px] font-semibold">
+              <button
+                type="button"
+                onClick={() => updateSettings(activeJob.id, { colorMode: 'Color' })}
+                className={`h-full px-2 rounded-[6px] transition-colors cursor-pointer ${
+                  (activeJob.settings.colorMode || 'Color') === 'Color'
+                    ? 'bg-blue text-white shadow-xs'
+                    : 'text-muted hover:text-ink'
+                }`}
+              >
+                Color
+              </button>
+              <button
+                type="button"
+                onClick={() => updateSettings(activeJob.id, { colorMode: 'B&W' })}
+                className={`h-full px-2 rounded-[6px] transition-colors cursor-pointer ${
+                  activeJob.settings.colorMode === 'B&W'
+                    ? 'bg-blue text-white shadow-xs'
+                    : 'text-muted hover:text-ink'
+                }`}
+              >
+                B&W
+              </button>
+            </div>
+          </div>
+
+          {/* Paper type chips */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-none">
+            {priceSettings.paperTypes.map((pt) => {
+              const currentPaperType = activeJob.settings.paperType || 'Standard';
+              const isSelected = currentPaperType.toLowerCase() === pt.name.toLowerCase();
+              return (
+                <button
+                  key={pt.id}
+                  type="button"
+                  onClick={() => {
+                    updateSettings(activeJob.id, { paperType: pt.name });
+                    if (pt.kind === 'by-photo') {
+                      setJobPaper(activeJob.id, 'a4');
+                    }
+                  }}
+                  className={`h-[28px] px-2.5 rounded-[8px] text-[11.5px] font-semibold whitespace-nowrap transition-colors cursor-pointer border ${
+                    isSelected
+                      ? 'border-blue bg-blue-tint text-blue'
+                      : 'border-line bg-surface text-ink hover:border-line2'
+                  }`}
+                >
+                  {pt.name}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Warnings */}
+          {pricingResult.warnings.map((w, idx) => (
+            <div
+              key={idx}
+              className="flex items-start gap-1.5 text-[11.5px] font-medium text-yellow bg-yellow/10 border border-yellow/30 px-2.5 py-1.5 rounded-[8px]"
+            >
+              <span className="shrink-0">•</span>
+              <span>{w}</span>
+            </div>
+          ))}
+
+          {/* Total & Details toggle */}
+          <div className="flex items-baseline justify-between pt-1 border-t border-line">
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-[22px] font-heading font-extrabold text-ink tracking-tight">
+                ₱{pricingResult.total}
+              </span>
+              <span className="text-[11px] text-muted">total</span>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowPriceDetails(!showPriceDetails)}
+              className="text-[11.5px] font-semibold text-blue hover:underline cursor-pointer flex items-center gap-1"
+            >
+              <span>Details</span>
+              <ChevronDown
+                className={`w-3.5 h-3.5 transition-transform ${showPriceDetails ? 'rotate-180' : ''}`}
+              />
+            </button>
+          </div>
+
+          {/* Expanded details list */}
+          {showPriceDetails && (
+            <div className="mt-0.5 pt-1.5 border-t border-line/60 flex flex-col gap-1 max-h-36 overflow-y-auto text-[11.5px] text-muted pr-1">
+              {pricingResult.lines.map((line, idx) => (
+                <div key={idx} className="flex items-start justify-between gap-2 py-0.5">
+                  <span className="leading-snug">{line}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Bottom text */}
       <div className="flex items-center justify-center gap-1.5 text-[11.5px] text-faint pt-1 shrink-0 mt-auto">

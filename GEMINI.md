@@ -24,3 +24,14 @@
 ## 5. Development Test Hooks
 - **Production Hygiene**: Any test helper or debug interface mounted on `window` (e.g. `window.__AZ_TEST__`) must be wrapped in `process.env.NODE_ENV !== 'production'` so that production builds remain clean.
 - **Clean Code Comments**: Maintain comment hygiene. Avoid decorative separators, narrative changelog comments, or workflow blow-by-blow descriptions in production code.
+
+## 6. Clipboard Synchronization & Precedence
+- **Internal Marker Protocol**: In-app cut/copy actions must write a plain-text token (`azpr-internal:<sessionId>:<counter>`) to the system clipboard while saving the element payload in memory.
+- **Newest Copy Wins**: On paste, check the system clipboard. If it contains external image data without the active session marker, paste the external image. If the active marker is present, paste the in-app clipboard elements.
+
+## 7. Data Privacy & Persistence Guardrails
+- **No Customer Data Persistence**: Customer images, job layouts, and personal identifiers must never be written to `localStorage` or persistent client storage.
+- **Dedicated Config Keys**: Only owner-configured application preferences (such as `azpr-prices`) may be persisted, using clear, namespaced keys.
+
+## 8. State Store Invariance in Automated Verification
+- **Fresh State Retrieval**: When writing verification scripts or CDP tests that trigger store actions, remember that Zustand states are immutable. Re-fetch `useStore.getState()` after any mutation before asserting on state properties to avoid reading stale references.

@@ -73,10 +73,12 @@ const MORE_PAPERS = ['legal', 'a3', 'a5', '4r', '5r'];
 
 const MORE_SIZE_PRESETS: SizePreset[] = [
   { id: 'passport', name: 'Passport', wMm: 35, hMm: 45 },
+  { id: 'cute', name: 'Cute', wMm: 50.8, hMm: 76.2 },
   { id: '3r', name: '3R', wMm: 88.9, hMm: 127 },
   { id: '4r', name: '4R', wMm: 101.6, hMm: 152.4 },
   { id: '5r', name: '5R', wMm: 127, hMm: 177.8 },
   { id: '6r', name: '6R', wMm: 152.4, hMm: 203.2 },
+  { id: 'a5', name: 'A5', wMm: 148, hMm: 210 },
   { id: '8r', name: '8R', wMm: 203.2, hMm: 254 },
   { id: 'a6', name: 'A6', wMm: 105, hMm: 148 },
 ];
@@ -560,6 +562,27 @@ export function Sidebar() {
   const isStartState = !activeJob?.pages.some((p) => p.elements.length > 0);
   const currentPaperId = firstPage?.paperId || 'letter';
   const isMorePaperActive = MORE_PAPERS.includes(currentPaperId);
+
+  const currentPrintable = React.useMemo(() => {
+    if (!activeJob || !firstPage) return { w: 9999, h: 9999 };
+    const pInfo = PAPERS.find((p) => p.id === firstPage.paperId) || PAPERS[0];
+    const isLand = firstPage.orientation === 'landscape';
+    const pW = isLand ? pInfo.heightMm : pInfo.widthMm;
+    const pH = isLand ? pInfo.widthMm : pInfo.heightMm;
+    const margin = activeJob.settings.borderless ? 0 : (activeJob.settings.marginMm ?? 6.35);
+    return {
+      w: Math.max(0, pW - 2 * margin),
+      h: Math.max(0, pH - 2 * margin),
+    };
+  }, [activeJob, firstPage]);
+
+  const visibleMorePresets = React.useMemo(() => {
+    return MORE_SIZE_PRESETS.filter((preset) => {
+      const fit1 = preset.wMm <= currentPrintable.w + 0.1 && preset.hMm <= currentPrintable.h + 0.1;
+      const fit2 = preset.hMm <= currentPrintable.w + 0.1 && preset.wMm <= currentPrintable.h + 0.1;
+      return fit1 || fit2;
+    });
+  }, [currentPrintable]);
 
   const activePage =
     activeJob?.pages.find((p) => p.id === activePageId) || activeJob?.pages[0];
@@ -1189,7 +1212,7 @@ export function Sidebar() {
                             Presets
                           </span>
                           <div className="grid grid-cols-2 gap-1">
-                            {MORE_SIZE_PRESETS.map((preset) => {
+                            {visibleMorePresets.map((preset) => {
                               const isSelected = activeRow?.size.id === preset.id;
                               return (
                                 <button

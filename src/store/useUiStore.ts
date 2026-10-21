@@ -100,6 +100,7 @@ interface UiState {
 
   // Settings Modal
   isSettingsOpen: boolean;
+  settingsTab: 'general' | 'prices';
 
   // Confirm Modal
   confirmModal: ConfirmModalState | null;
@@ -114,7 +115,8 @@ interface UiState {
   message: UiMessage | null;
 
   setEditingBlockLayoutId: (id: string | null) => void;
-  setSettingsOpen: (open: boolean) => void;
+  setSettingsOpen: (open: boolean, tab?: 'general' | 'prices') => void;
+  setSettingsTab: (tab: 'general' | 'prices') => void;
   openConfirmModal: (conf: ConfirmModalState) => void;
   closeConfirmModal: () => void;
   openPrintChooser: (action: 'print' | 'export' | 'testSheet') => void;
@@ -249,6 +251,7 @@ export const useUiStore = create<UiState>((set) => ({
   multiImport: null,
   editingBlockLayoutId: null,
   isSettingsOpen: false,
+  settingsTab: 'general',
   confirmModal: null,
   printChooser: null,
   cropModal: null,
@@ -259,8 +262,15 @@ export const useUiStore = create<UiState>((set) => ({
     set({ editingBlockLayoutId: id });
   },
 
-  setSettingsOpen: (open: boolean) => {
-    set({ isSettingsOpen: open });
+  setSettingsOpen: (open: boolean, tab: 'general' | 'prices' = 'general') => {
+    set({
+      isSettingsOpen: open,
+      settingsTab: open ? tab : 'general',
+    });
+  },
+
+  setSettingsTab: (tab: 'general' | 'prices') => {
+    set({ settingsTab: tab });
   },
 
   openConfirmModal: (conf: ConfirmModalState) => {

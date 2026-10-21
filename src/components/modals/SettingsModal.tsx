@@ -10,10 +10,13 @@ import { mmToUnit, unitToMm } from '@/lib/units';
 import { computeCutGuides } from '@/lib/cutGuides';
 import { addTextBox, newTextPage } from '@/lib/textActions';
 import { getBackNudge, setBackNudge, resetBackNudge, type BackNudge } from '@/lib/backNudge';
+import { PricesSettingsSection } from './PricesSettingsSection';
 
 export function SettingsModal() {
   const isSettingsOpen = useUiStore((s) => s.isSettingsOpen);
   const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
+  const settingsTab = useUiStore((s) => s.settingsTab);
+  const setSettingsTab = useUiStore((s) => s.setSettingsTab);
   const openPrintChooser = useUiStore((s) => s.openPrintChooser);
   const activePageId = useUiStore((s) => s.activePageId);
   const clearSelection = useUiStore((s) => s.clearSelection);
@@ -34,6 +37,40 @@ export function SettingsModal() {
 
   // Back alignment calibration nudge
   const [nudge, setNudge] = useState<BackNudge>({ xMm: 0, yMm: 0 });
+
+  const scrollContainerRef = React.useRef<HTMLDivElement>(null);
+  const generalTabRef = React.useRef<HTMLButtonElement>(null);
+  const pricesTabRef = React.useRef<HTMLButtonElement>(null);
+
+  const switchTab = (tab: 'general' | 'prices') => {
+    setSettingsTab(tab);
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = 0;
+    }
+  };
+
+  useEffect(() => {
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = 0;
+    }
+  }, [isSettingsOpen, settingsTab]);
+
+  const handleTabKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    const currentTab = useUiStore.getState().settingsTab;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (currentTab !== 'prices') {
+        switchTab('prices');
+        pricesTabRef.current?.focus();
+      }
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (currentTab !== 'general') {
+        switchTab('general');
+        generalTabRef.current?.focus();
+      }
+    }
+  };
 
   useEffect(() => {
     if (isSettingsOpen) {
@@ -127,36 +164,92 @@ export function SettingsModal() {
     <ModalShell
       titleId="settings-modal-title"
       onCancel={onClose}
-      className="w-[min(580px,calc(100vw-48px))] max-h-[90vh] flex flex-col bg-surface rounded-[28px] px-[36px] pt-[32px] pb-[28px] border border-line2 text-ink shadow-[0_40px_100px_-20px_rgba(0,0,0,0.7)] relative overflow-hidden focus:outline-none"
+      className="w-[min(580px,calc(100vw-48px))] h-[min(720px,calc(100vh-64px))] flex flex-col bg-surface rounded-[28px] px-[36px] pt-[32px] pb-[28px] border border-line2 text-ink shadow-[0_40px_100px_-20px_rgba(0,0,0,0.7)] relative overflow-hidden focus:outline-none"
     >
       {/* Header */}
-      <div className="flex items-start justify-between pb-5 border-b border-line shrink-0">
-        <div className="flex flex-col gap-1">
-          <h2
-            id="settings-modal-title"
-            className="font-heading font-extrabold text-[34px] tracking-[-0.02em] text-ink leading-tight"
+      <div className="flex flex-col gap-4 pb-5 border-b border-line shrink-0">
+        <div className="flex items-start justify-between">
+          <div className="flex flex-col gap-1">
+            <h2
+              id="settings-modal-title"
+              className="font-heading font-extrabold text-[34px] tracking-[-0.02em] text-ink leading-tight"
+            >
+              Project{' '}
+              <span className="font-accent italic text-[40px] text-red font-normal">
+                settings
+              </span>
+            </h2>
+            <p className="text-[15px] text-muted">
+              Margins, spacing, units, and page tools.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close settings"
+            className="w-10 h-10 flex items-center justify-center rounded-[12px] text-muted hover:text-ink hover:bg-surface2 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue"
           >
-            Project{' '}
-            <span className="font-accent italic text-[40px] text-red font-normal">
-              settings
-            </span>
-          </h2>
-          <p className="text-[15px] text-muted">
-            Margins, spacing, units, and page tools.
-          </p>
+            <X className="w-5 h-5" />
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close settings"
-          className="w-10 h-10 flex items-center justify-center rounded-[12px] text-muted hover:text-ink hover:bg-surface2 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue"
+
+        {/* Big Tabs: General and Prices */}
+        <div
+          role="tablist"
+          aria-label="Settings sections"
+          className="grid grid-cols-2 p-1 bg-surface2 rounded-[14px] border border-line gap-1"
         >
-          <X className="w-5 h-5" />
-        </button>
+          <button
+            ref={generalTabRef}
+            role="tab"
+            id="tab-general"
+            aria-controls="panel-general"
+            aria-selected={settingsTab === 'general'}
+            tabIndex={settingsTab === 'general' ? 0 : -1}
+            type="button"
+            onClick={() => switchTab('general')}
+            onKeyDown={handleTabKeyDown}
+            className={`h-[42px] flex items-center justify-center rounded-[10px] text-[14px] font-bold transition-all cursor-pointer ${
+              settingsTab === 'general'
+                ? 'bg-surface text-ink shadow-sm border border-line2'
+                : 'text-muted hover:text-ink'
+            } focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue`}
+          >
+            General
+          </button>
+          <button
+            ref={pricesTabRef}
+            role="tab"
+            id="tab-prices"
+            aria-controls="panel-prices"
+            aria-selected={settingsTab === 'prices'}
+            tabIndex={settingsTab === 'prices' ? 0 : -1}
+            type="button"
+            onClick={() => switchTab('prices')}
+            onKeyDown={handleTabKeyDown}
+            className={`h-[42px] flex items-center justify-center rounded-[10px] text-[14px] font-bold transition-all cursor-pointer ${
+              settingsTab === 'prices'
+                ? 'bg-surface text-ink shadow-sm border border-line2'
+                : 'text-muted hover:text-ink'
+            } focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue`}
+          >
+            Prices
+          </button>
+        </div>
       </div>
 
       {/* Body: Scrollable sections */}
-      <div className="flex-1 overflow-y-auto py-5 flex flex-col gap-6 pr-1">
+      <div
+        ref={scrollContainerRef}
+        className="flex-1 overflow-y-auto py-5 flex flex-col gap-6 pr-1"
+      >
+        {settingsTab === 'general' ? (
+          <div
+            role="tabpanel"
+            id="panel-general"
+            aria-labelledby="tab-general"
+            className="flex flex-col gap-6"
+          >
         {/* 1) Units */}
         <section className="flex flex-col">
           <h3 className="text-[11.5px] font-bold uppercase tracking-[0.14em] text-faint mb-2.5">
@@ -409,6 +502,17 @@ export function SettingsModal() {
           </button>
         </section>
       </div>
+    ) : (
+      <div
+        role="tabpanel"
+        id="panel-prices"
+        aria-labelledby="tab-prices"
+        className="flex flex-col gap-6"
+      >
+        <PricesSettingsSection />
+      </div>
+    )}
+  </div>
 
       {/* Footer */}
       <div className="pt-4 border-t border-line flex items-center justify-end shrink-0">

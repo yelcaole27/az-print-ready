@@ -185,6 +185,8 @@ const defaultSettings: Settings = {
   gapMm: 2,
   cutStyle: 'outline',
   borderless: false,
+  paperType: 'Standard',
+  colorMode: 'Color',
 };
 
 const initialJobId = nanoid();

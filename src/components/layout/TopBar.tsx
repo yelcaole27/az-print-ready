@@ -157,7 +157,7 @@ export function TopBar() {
           <Tooltip content="Settings">
             <button
               type="button"
-              onClick={() => setSettingsOpen(true)}
+              onClick={() => setSettingsOpen(true, 'general')}
               aria-label="Settings"
               className="w-10 h-10 flex items-center justify-center rounded-[12px] text-[#F3F0E9] hover:bg-white/10 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#69B7F7]"
             >

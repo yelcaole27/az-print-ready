@@ -47,6 +47,8 @@ import {
   getClipboardSessionId,
   getInAppCopyCounter,
 } from '@/lib/clipboard';
+import { usePriceStore } from '@/store/usePriceStore';
+import { calculateJobPrice } from '@/lib/pricing';
 
 export function AppShell() {
   const { jobs, assets } = useSessionStore();
@@ -91,6 +93,8 @@ export function AppShell() {
         setLastMarkerWriteFailed,
         getClipboardSessionId,
         getInAppCopyCounter,
+        usePriceStore,
+        calculateJobPrice,
       };
     }
   }, [initTheme]);

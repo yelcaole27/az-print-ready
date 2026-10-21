@@ -105,6 +105,8 @@ export interface Settings {
   gapMm: number;
   cutStyle: 'none' | 'ticks' | 'outline';
   borderless: boolean;
+  paperType?: string;
+  colorMode?: 'Color' | 'B&W';
 }
 
 export interface Job {
