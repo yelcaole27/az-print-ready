@@ -36,6 +36,16 @@ import {
   hasInAppClipboard,
   clearInAppClipboard,
   isInputOrModalFocused,
+  hasSelectionToCopy,
+  parseMarker,
+  isCurrentMarker,
+  getInAppCopyTimestamp,
+  getLastSystemPasteTimestamp,
+  recordSystemPaste,
+  isLastMarkerWriteFailed,
+  setLastMarkerWriteFailed,
+  getClipboardSessionId,
+  getInAppCopyCounter,
 } from '@/lib/clipboard';
 
 export function AppShell() {
@@ -71,6 +81,16 @@ export function AppShell() {
         hasInAppClipboard,
         clearInAppClipboard,
         isInputOrModalFocused,
+        hasSelectionToCopy,
+        parseMarker,
+        isCurrentMarker,
+        getInAppCopyTimestamp,
+        getLastSystemPasteTimestamp,
+        recordSystemPaste,
+        isLastMarkerWriteFailed,
+        setLastMarkerWriteFailed,
+        getClipboardSessionId,
+        getInAppCopyCounter,
       };
     }
   }, [initTheme]);
@@ -96,8 +116,17 @@ export function AppShell() {
   // Global paste listener for images & in-app pictures
   useEffect(() => {
     const handlePaste = (e: ClipboardEvent) => {
-      if (isInputOrModalFocused()) return;
+      // 1. If focused in an input/textarea/modal, preserve normal text editing
+      if (isInputOrModalFocused()) {
+        const text = e.clipboardData?.getData('text/plain') || '';
+        // If the clipboard holds an internal picture marker, prevent pasting raw marker text
+        if (text && text.trim().startsWith('azpr-internal:')) {
+          e.preventDefault();
+        }
+        return;
+      }
 
+      // 2. Extract image files and text from clipboardData
       const files: File[] = [];
       if (e.clipboardData) {
         if (e.clipboardData.files && e.clipboardData.files.length > 0) {
@@ -116,32 +145,89 @@ export function AppShell() {
         }
       }
 
-      // Priority: if the system clipboard has an image, paste that image.
-      // Otherwise, if the in-app clipboard has pictures, paste those.
-      // Clear the in-app clipboard when a system image is pasted so the two never mix.
-      if (files.length > 0) {
-        e.preventDefault();
-        clearInAppClipboard();
-        importFiles(files);
-        return;
-      }
+      const text = e.clipboardData?.getData('text/plain') || '';
+      const marker = parseMarker(text);
+      const isCurrent = isCurrentMarker(text);
 
-      if (hasInAppClipboard()) {
+      // Case A: Current in-app marker exists and in-app clipboard is non-empty: in-app copy wins
+      if (isCurrent && hasInAppClipboard()) {
         e.preventDefault();
         pasteInAppClipboard();
         return;
       }
 
-      // Check for plain text clipboard content
-      const plainText = e.clipboardData?.getData('text/plain');
-      if (plainText && plainText.trim().length > 0) {
+      // Case B: System image files exist, and no current in-app marker
+      if (files.length > 0) {
+        // Fallback: If clipboard write failed (permission denied), prefer in-app copy if newer than last system paste
+        if (
+          isLastMarkerWriteFailed() &&
+          hasInAppClipboard() &&
+          getInAppCopyTimestamp() > getLastSystemPasteTimestamp()
+        ) {
+          e.preventDefault();
+          pasteInAppClipboard();
+          return;
+        }
+
         e.preventDefault();
-        newTextPage(plainText);
+        recordSystemPaste();
+        clearInAppClipboard();
+        importFiles(files);
+        return;
+      }
+
+      // Case C: Fallback when no files on clipboardData
+      if (hasInAppClipboard() && getInAppCopyTimestamp() > getLastSystemPasteTimestamp()) {
+        e.preventDefault();
+        pasteInAppClipboard();
+        return;
+      }
+
+      // Case D: Plain text paste (create text page only if NOT an internal marker)
+      if (text && text.trim().length > 0 && !marker) {
+        e.preventDefault();
+        newTextPage(text);
       }
     };
 
     document.addEventListener('paste', handlePaste);
     return () => document.removeEventListener('paste', handlePaste);
+  }, []);
+
+  // Global copy and cut listeners to set marker on system clipboard
+  useEffect(() => {
+    const handleCopy = (e: ClipboardEvent) => {
+      if (isInputOrModalFocused() || !hasSelectionToCopy()) return;
+
+      const marker = copySelection({ skipWriteText: Boolean(e.clipboardData) });
+      if (marker) {
+        e.preventDefault();
+        if (e.clipboardData) {
+          e.clipboardData.setData('text/plain', marker);
+          setLastMarkerWriteFailed(false);
+        }
+      }
+    };
+
+    const handleCut = (e: ClipboardEvent) => {
+      if (isInputOrModalFocused() || !hasSelectionToCopy()) return;
+
+      const marker = cutSelection({ skipWriteText: Boolean(e.clipboardData) });
+      if (marker) {
+        e.preventDefault();
+        if (e.clipboardData) {
+          e.clipboardData.setData('text/plain', marker);
+          setLastMarkerWriteFailed(false);
+        }
+      }
+    };
+
+    document.addEventListener('copy', handleCopy);
+    document.addEventListener('cut', handleCut);
+    return () => {
+      document.removeEventListener('copy', handleCopy);
+      document.removeEventListener('cut', handleCut);
+    };
   }, []);
 
   // Global keyboard shortcuts (Ctrl/Cmd+Z, Y, P, C, X, D, V)
@@ -167,14 +253,12 @@ export function AppShell() {
           e.preventDefault();
           requestPrint();
         } else if (key === 'c') {
-          const handled = copySelection();
-          if (handled) {
-            e.preventDefault();
+          if (hasSelectionToCopy()) {
+            copySelection();
           }
         } else if (key === 'x') {
-          const handled = cutSelection();
-          if (handled) {
-            e.preventDefault();
+          if (hasSelectionToCopy()) {
+            cutSelection();
           }
         } else if (key === 'a' && e.shiftKey) {
           e.preventDefault();

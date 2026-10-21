@@ -12,6 +12,12 @@ interface InAppClipboard {
   pasteCount: number;
 }
 
+const CLIPBOARD_SESSION_ID = nanoid();
+let inAppCopyCounter = 0;
+let inAppCopyTimestamp = 0;
+let lastSystemPasteTimestamp = 0;
+let lastMarkerWriteFailed = false;
+
 let inAppClipboard: InAppClipboard | null = null;
 
 export function hasInAppClipboard(): boolean {
@@ -20,6 +26,74 @@ export function hasInAppClipboard(): boolean {
 
 export function clearInAppClipboard(): void {
   inAppClipboard = null;
+}
+
+export function parseMarker(text: string): { sessionId: string; counter: number } | null {
+  if (!text || typeof text !== 'string') return null;
+  const trimmed = text.trim();
+  if (!trimmed.startsWith('azpr-internal:')) return null;
+  const parts = trimmed.split(':');
+  if (parts.length !== 3) return null;
+  const counter = parseInt(parts[2], 10);
+  if (isNaN(counter)) return null;
+  return { sessionId: parts[1], counter };
+}
+
+export function isCurrentMarker(text: string): boolean {
+  const parsed = parseMarker(text);
+  if (!parsed) return false;
+  return parsed.sessionId === CLIPBOARD_SESSION_ID && parsed.counter === inAppCopyCounter;
+}
+
+export function getInAppCopyTimestamp(): number {
+  return inAppCopyTimestamp;
+}
+
+export function getLastSystemPasteTimestamp(): number {
+  return lastSystemPasteTimestamp;
+}
+
+export function recordSystemPaste(): void {
+  lastSystemPasteTimestamp = Date.now();
+}
+
+export function isLastMarkerWriteFailed(): boolean {
+  return lastMarkerWriteFailed;
+}
+
+export function setLastMarkerWriteFailed(val: boolean): void {
+  lastMarkerWriteFailed = val;
+}
+
+export function getClipboardSessionId(): string {
+  return CLIPBOARD_SESSION_ID;
+}
+
+export function getInAppCopyCounter(): number {
+  return inAppCopyCounter;
+}
+
+export function hasSelectionToCopy(): boolean {
+  const { selected, selectedIds, selectedPageId } = useUiStore.getState();
+  const { jobs, activeJobId } = useSessionStore.getState();
+  const activeJob = jobs.find((j) => j.id === activeJobId) || jobs[0];
+  if (!activeJob) return false;
+
+  let pageId: string | null = null;
+  let elementIds: string[] = [];
+
+  if (selectedIds.length > 0 && selectedPageId) {
+    pageId = selectedPageId;
+    elementIds = selectedIds;
+  } else if (selected) {
+    pageId = selected.pageId;
+    elementIds = [selected.elementId];
+  }
+
+  if (!pageId || elementIds.length === 0) return false;
+  const page = activeJob.pages.find((p) => p.id === pageId);
+  if (!page) return false;
+  return page.elements.some((el) => elementIds.includes(el.id));
 }
 
 export function isInputOrModalFocused(): boolean {
@@ -62,11 +136,11 @@ export function isInputOrModalFocused(): boolean {
   return false;
 }
 
-export function copySelection(): boolean {
+export function copySelection(options?: { skipWriteText?: boolean }): string | null {
   const { selected, selectedIds, selectedPageId } = useUiStore.getState();
   const { jobs, activeJobId } = useSessionStore.getState();
   const activeJob = jobs.find((j) => j.id === activeJobId) || jobs[0];
-  if (!activeJob) return false;
+  if (!activeJob) return null;
 
   let pageId: string | null = null;
   let elementIds: string[] = [];
@@ -79,13 +153,29 @@ export function copySelection(): boolean {
     elementIds = [selected.elementId];
   }
 
-  if (!pageId || elementIds.length === 0) return false;
+  if (!pageId || elementIds.length === 0) return null;
 
   const page = activeJob.pages.find((p) => p.id === pageId);
-  if (!page) return false;
+  if (!page) return null;
 
   const elementsToCopy = page.elements.filter((el) => elementIds.includes(el.id));
-  if (elementsToCopy.length === 0) return false;
+  const now = Date.now();
+  if (now - inAppCopyTimestamp < 150 && inAppClipboard) {
+    const marker = `azpr-internal:${CLIPBOARD_SESSION_ID}:${inAppCopyCounter}`;
+    if (!options?.skipWriteText && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      navigator.clipboard
+        .writeText(marker)
+        .then(() => {
+          lastMarkerWriteFailed = false;
+        })
+        .catch(() => {
+          lastMarkerWriteFailed = true;
+        });
+    } else if (options?.skipWriteText) {
+      lastMarkerWriteFailed = false;
+    }
+    return marker;
+  }
 
   inAppClipboard = {
     elements: elementsToCopy.map((el) => ({ ...el })),
@@ -93,17 +183,34 @@ export function copySelection(): boolean {
     pasteCount: 0,
   };
 
-  return true;
+  inAppCopyCounter += 1;
+  inAppCopyTimestamp = Date.now();
+  const marker = `azpr-internal:${CLIPBOARD_SESSION_ID}:${inAppCopyCounter}`;
+
+  if (!options?.skipWriteText && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    navigator.clipboard
+      .writeText(marker)
+      .then(() => {
+        lastMarkerWriteFailed = false;
+      })
+      .catch(() => {
+        lastMarkerWriteFailed = true;
+      });
+  } else if (options?.skipWriteText) {
+    lastMarkerWriteFailed = false;
+  }
+
+  return marker;
 }
 
-export function cutSelection(): boolean {
-  const copied = copySelection();
-  if (!copied || !inAppClipboard) return false;
+export function cutSelection(options?: { skipWriteText?: boolean }): string | null {
+  const marker = copySelection(options);
+  if (!marker || !inAppClipboard) return null;
 
   const { clearSelection } = useUiStore.getState();
   const { jobs, activeJobId, commit } = useSessionStore.getState();
   const activeJob = jobs.find((j) => j.id === activeJobId) || jobs[0];
-  if (!activeJob) return false;
+  if (!activeJob) return null;
 
   const pageId = inAppClipboard.sourcePageId;
   const elementIdsToRemove = new Set(inAppClipboard.elements.map((el) => el.id));
@@ -128,7 +235,7 @@ export function cutSelection(): boolean {
   }));
 
   clearSelection();
-  return true;
+  return marker;
 }
 
 export function duplicateSelection(): boolean {

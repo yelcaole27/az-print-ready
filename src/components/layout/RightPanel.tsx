@@ -8,6 +8,7 @@ import { mmToUnit, unitToMm } from '@/lib/units';
 import { PAPERS } from '@/lib/constants/papers';
 import { Button } from '@/components/ui/Button';
 import { getEffectiveDpi } from '@/lib/quality';
+import { copySelection } from '@/lib/clipboard';
 import type { PageElement, ImageAsset, Job, Unit, Page } from '@/types';
 
 const BRAND_COLORS = [
@@ -376,12 +377,10 @@ function ElementInspectorForm({
           <button
             type="button"
             disabled={isSliced}
-            title="Copy (Ctrl+D)"
+            title="Copy (Ctrl+C)"
             onClick={() => {
-              const newId = duplicateElement(job.id, pageId, element.id);
-              if (newId) {
-                select({ pageId, elementId: newId });
-              }
+              select({ pageId, elementId: element.id });
+              copySelection();
             }}
             className="h-[38px] flex-1 rounded-[12px] border-[1.5px] border-line bg-surface text-ink text-xs font-semibold hover:border-line2 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
           >
